@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KAPAT - Klipper Auto PA Tuning</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  
+  <style>
+    /* Сетка для двух колонок */
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+    @media (max-width: 900px) {
+      .settings-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    
+    .slider-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      margin-top: 6px;
+    }
+    input[type="range"] {
+      flex-grow: 1;
+      -webkit-appearance: none;
+      background: transparent;
+      height: 6px;
+      border-radius: 3px;
+      background-color: var(--border);
+      outline: none;
+      margin: 0;
+      cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      height: 16px;
+      width: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      margin-top: -5px; 
+      box-shadow: 0 0 5px rgba(0,0,0,0.5);
+      transition: transform 0.1s;
+    }
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.2);
+    }
+    input[type="range"]::-moz-range-thumb {
+      height: 16px;
+      width: 16px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+      border: none;
+      box-shadow: 0 0 5px rgba(0,0,0,0.5);
+      transition: transform 0.1s;
+    }
+    input[type="range"]::-moz-range-thumb:hover {
+      transform: scale(1.2);
+    }
+    input[type="number"].slider-input {
+      width: 70px !important;
+      text-align: center;
+      flex-shrink: 0;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <header style="display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding-bottom: 20px; position: relative;">
+    <h1 style="font-size: 42px; margin: 0; line-height: 1; letter-spacing: 2px; color: var(--accent);">KAPAT</h1>
+    <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span id="title_main" style="font-size: 16px; font-weight: 600; color: var(--text);">Klipper Auto Pressure Advance Tuning</span>
+        <span id="title_sub" class="subtitle" style="font-size: 13px;">Loadcell-based automatic Pressure Advance calibration for Klipper.</span>
+    </div>
+
+    <div style="position: absolute; top: 15px; right: 15px; display: flex; gap: 8px;">
+      <button id="btn_lang_en" onclick="setLang('en')" style="padding: 4px 10px; font-size: 12px; font-weight: bold; cursor: pointer; border-radius: 4px; background: var(--panel-2); color: var(--text); border: 1px solid var(--border); transition: border-color 0.2s;">EN</button>
+      <button id="btn_lang_ru" onclick="setLang('ru')" style="padding: 4px 10px; font-size: 12px; font-weight: bold; cursor: pointer; border-radius: 4px; background: var(--panel-2); color: var(--text); border: 1px solid var(--accent); transition: border-color 0.2s;">RU</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2 id="sec1_title">1. Printer</h2>
+      <div class="row">
+        <label>Host / IP <input id="printer_host" placeholder="192.168.1.42" /></label>
+        <label>User <input id="printer_user" value="maker" /></label>
+        <label>PrusaLink password <input id="printer_password" type="password" placeholder="Core One — Settings → Network → PrusaLink" /></label>
+      </div>
+      <div class="row">
+        <label class="wide">Legacy API key (older Buddy only — leave blank if using password)
+          <input id="printer_api_key" type="password" />
+        </label>
+        <label>UDP port <input id="udp_port" type="number" value="8514" /></label>
+      </div>
+    </section>
+
+    <div class="settings-grid">
+      
+      <div class="settings-col">
+        <section class="card" style="height: 100%;">
+          <h2 id="sec3_title">3. Sweep parameters</h2>
+          
+          <div class="row">
+            <label><span id="lbl_slow_flow">Slow flow (mm³/s)</span> 
+              <div class="slider-container">
+                <input type="range" id="slider_slow_flow_mm3_s" min="0" max="15" step="0.01" value="1.92" oninput="syncVal('slider_slow_flow_mm3_s', 'slow_flow_mm3_s')" />
+                <input type="number" id="slow_flow_mm3_s" class="slider-input" min="0" max="15" step="0.01" value="1.92" oninput="syncVal('slow_flow_mm3_s', 'slider_slow_flow_mm3_s')" />
+              </div>
+            </label>
+            <label><span id="lbl_fast_flow">Fast flow (mm³/s)</span> 
+              <div class="slider-container">
+                <input type="range" id="slider_fast_flow_mm3_s" min="5" max="60" step="0.01" value="19.24" oninput="syncVal('slider_fast_flow_mm3_s', 'fast_flow_mm3_s')" />
+                <input type="number" id="fast_flow_mm3_s" class="slider-input" min="5" max="60" step="0.01" value="19.24" oninput="syncVal('fast_flow_mm3_s', 'slider_fast_flow_mm3_s')" />
+              </div>
+            </label>
+          </div>
+
+          <div class="row">
+            <label><span id="lbl_slow_vol">Slow volume (mm³)</span> 
+              <div class="slider-container">
+                <input type="range" id="slider_slow_volume_mm3" min="0.1" max="15" step="0.01" value="1.92" oninput="syncVal('slider_slow_volume_mm3', 'slow_volume_mm3')" />
+                <input type="number" id="slow_volume_mm3" class="slider-input" min="0.1" max="15" step="0.01" value="1.92" oninput="syncVal('slow_volume_mm3', 'slider_slow_volume_mm3')" />
+              </div>
+            </label>
+            <label><span id="lbl_fast_vol">Fast volume (mm³)</span> 
+              <div class="slider-container">
+                <input type="range" id="slider_fast_volume_mm3" min="0.1" max="20" step="0.01" value="4.81" oninput="syncVal('slider_fast_volume_mm3', 'fast_volume_mm3')" />
+                <input type="number" id="fast_volume_mm3" class="slider-input" min="0.1" max="20" step="0.01" value="4.81" oninput="syncVal('fast_volume_mm3', 'slider_fast_volume_mm3')" />
+              </div>
+            </label>
+          </div>
+
+          <div class="row">
+            <label>Cycles / K 
+              <div class="slider-container">
+                <input type="range" id="slider_cycles_per_K" min="5" max="40" step="1" value="14" oninput="syncVal('slider_cycles_per_K', 'cycles_per_K')" />
+                <input type="number" id="cycles_per_K" class="slider-input" min="5" max="40" step="1" value="14" oninput="syncVal('cycles_per_K', 'slider_cycles_per_K')" />
+              </div>
+            </label>
+            <label><span id="lbl_accel">Accel (mm/s²)</span> 
+              <div class="slider-container">
+                <input type="range" id="slider_accel_mm_s2" min="100" max="20000" step="50" value="5000" oninput="syncVal('slider_accel_mm_s2', 'accel_mm_s2')" />
+                <input type="number" id="accel_mm_s2" class="slider-input" min="100" max="20000" step="50" value="5000" oninput="syncVal('accel_mm_s2', 'slider_accel_mm_s2')" />
+              </div>
+            </label>
+          </div>
+
+          <div class="row">
+            <label>K min 
+              <div class="slider-container">
+                <input type="range" id="slider_k_min" min="0" max="0.2" step="0.001" value="0.000" oninput="syncVal('slider_k_min', 'k_min')" />
+                <input type="number" id="k_min" class="slider-input" min="0" max="0.2" step="0.001" value="0.000" oninput="syncVal('k_min', 'slider_k_min')" />
+              </div>
+            </label>
+            <label>K max 
+              <div class="slider-container">
+                <input type="range" id="slider_k_max" min="0.01" max="0.5" step="0.001" value="0.100" oninput="syncVal('slider_k_max', 'k_max')" />
+                <input type="number" id="k_max" class="slider-input" min="0.01" max="0.5" step="0.001" value="0.100" oninput="syncVal('k_max', 'slider_k_max')" />
+              </div>
+            </label>
+          </div>
+
+          <div class="row">
+            <label>K step 
+              <div class="slider-container">
+                <input type="range" id="slider_k_step" min="0.001" max="0.02" step="0.001" value="0.002" oninput="syncVal('slider_k_step', 'k_step')" />
+                <input type="number" id="k_step" class="slider-input" min="0.001" max="0.02" step="0.001" value="0.002" oninput="syncVal('k_step', 'slider_k_step')" />
+              </div>
+            </label>
+            <label>
+              <span id="lbl_warmup">First slow-leg factor (warm-up)</span>
+              <div class="slider-container">
+                <input type="range" id="slider_first_slow_leg_factor" min="1" max="20" step="0.5" value="10" oninput="syncVal('slider_first_slow_leg_factor', 'first_slow_leg_factor')" />
+                <input type="number" id="first_slow_leg_factor" class="slider-input" min="1" max="20" step="0.5" value="10" oninput="syncVal('first_slow_leg_factor', 'slider_first_slow_leg_factor')" />
+              </div>
+            </label>
+          </div>
+        </section>
+      </div>
+
+      <div class="settings-col">
+        <section class="card" style="height: 100%;">
+          <h2 id="sec2_title">2. Filament &amp; temps</h2>
+          
+          <div class="row" style="margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px dashed var(--border); display: flex; flex-direction: column; align-items: flex-start; gap: 8px;">
+            <label class="wide" style="color: var(--accent);"><b id="lbl_preset">Filament Preset:</b></label>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 100%;">
+              <select id="filament_preset" onchange="loadPreset()" style="background: var(--panel-2); border: 1px solid var(--accent); color: var(--text); padding: 6px 10px; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; flex-grow: 1; max-width: 100%;">
+              </select>
+              
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button id="btn_preset_save" type="button" onclick="saveCurrentPreset()" style="padding: 4px 8px; font-size: 12px;">💾 Save</button>
+                <button id="btn_preset_new" type="button" onclick="saveAsNewPreset()" style="padding: 4px 8px; font-size: 12px;">➕ Save As New</button>
+                <button id="btn_preset_rename" type="button" onclick="renamePreset()" style="padding: 4px 8px; font-size: 12px;">✏️ Rename</button>
+                <button id="btn_preset_del" type="button" onclick="deletePreset()" style="padding: 4px 8px; font-size: 12px; color: var(--danger); border-color: var(--danger);">🗑️ Delete</button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="row">
+            <label class="wide">Label <input id="filament_label" value="PLA" style="width: 100%; box-sizing: border-box;"/></label>
+          </div>
+
+          <div class="row">
+            <label><span id="lbl_temp">Test temp °C</span> 
+              <div class="slider-container">
+                <input type="range" id="slider_nozzle_temp" min="150" max="320" step="1" value="215" oninput="syncVal('slider_nozzle_temp', 'nozzle_temp')" />
+                <input type="number" id="nozzle_temp" class="slider-input" min="150" max="320" step="1" value="215" oninput="syncVal('nozzle_temp', 'slider_nozzle_temp')" />
+              </div>
+            </label>
+            <label><span id="lbl_preheat">Preheat °C</span> 
+              <div class="slider-container">
+                <input type="range" id="slider_preheat_temp" min="150" max="320" step="1" value="225" oninput="syncVal('slider_preheat_temp', 'preheat_temp')" />
+                <input type="number" id="preheat_temp" class="slider-input" min="150" max="320" step="1" value="225" oninput="syncVal('preheat_temp', 'slider_preheat_temp')" />
+              </div>
+            </label>
+          </div>
+
+          <div class="row">
+            <label>Nozzle Ø 
+              <div class="slider-container">
+                <input type="range" id="slider_nozzle_diameter" min="0.1" max="1.2" step="0.1" value="0.4" oninput="syncVal('slider_nozzle_diameter', 'nozzle_diameter')" />
+                <input type="number" id="nozzle_diameter" class="slider-input" min="0.1" max="1.2" step="0.1" value="0.4" oninput="syncVal('nozzle_diameter', 'slider_nozzle_diameter')" />
+              </div>
+            </label>
+            <label>Filament Ø 
+              <div class="slider-container">
+                <input type="range" id="slider_filament_diameter" min="1.70" max="3.00" step="0.01" value="1.75" oninput="syncVal('slider_filament_diameter', 'filament_diameter')" />
+                <input type="number" id="filament_diameter" class="slider-input" min="1.70" max="3.00" step="0.01" value="1.75" oninput="syncVal('filament_diameter', 'slider_filament_diameter')" />
+              </div>
+            </label>
+          </div>
+        </section>
+      </div>
+    </div> <section class="card actions">
+      <button id="btn_save" type="button" id="btn_action_save">Save config</button>
+      <button id="btn_preview" type="button" style="display: none;">Preview G-code</button>
+      <button id="btn_run" type="button" class="primary" id="btn_action_run">Start tuning run</button>
+      <button id="btn_cancel" type="button" class="danger" style="display: none;">Cancel</button>
+      
+      <label class="replay-picker">
+        <span id="lbl_replay">Replay a saved run</span>
+        <div style="display: flex; gap: 8px; margin-top: 4px; align-items: center;">
+            <select id="runs_select" style="flex-grow: 1;"><option value="">— select —</option></select>
+            <button id="btn_replay_refresh" type="button" style="padding: 6px 12px;">↻</button>
+            <button id="btn_clear_npz" type="button" onclick="clearNpzFiles()" class="danger" style="padding: 6px 12px; border-color: var(--danger);" title="Delete all .npz files">🗑️</button>
+        </div>
+        <div id="run_meta" class="meta" style="margin-top:4px; font-size: 0.85em;"></div>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2 id="sec_live">Live loadcell</h2>
+      <div id="live_plot" style="width:100%;height:300px;"></div>
+      <div class="status">
+        <span id="status_state">idle</span> ·
+        <span id="status_msg"></span> ·
+        K=<span id="status_k">—</span> ·
+        <span id="status_pct">0</span>%
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 id="sec_browser">bd_pressure segment browser</h2>
+      <div id="desc_browser" class="meta">
+        Step through every low-high-low segment (low_n + high_n + low_{n+1})
+        and inspect what the analyser saw. Click a K on the left to focus it;
+        use prev/next buttons or ← / → keys to step through that K's segments.
+        Segments excluded by the auto-quality gate are flagged with the reason.
+      </div>
+      <div id="bd_browser" class="bd-browser">
+        <div id="bd_k_list" class="bd-k-list"></div>
+        <div class="bd-segment-pane">
+          <div class="bd-segment-header">
+            <div class="bd-segment-nav">
+              <button id="bd_prev" type="button" title="prev segment (←)">◀</button>
+              <span id="bd_segment_label">no run loaded</span>
+              <button id="bd_next" type="button" title="next segment (→)">▶</button>
+            </div>
+            <div id="bd_excluded_banner" class="bd-excluded" style="display:none;"></div>
+            <div class="bd-overlay-toggles">
+              <label><input type="checkbox" id="bd_overlay_transitions" checked> transitions</label>
+              <label><input type="checkbox" id="bd_overlay_levels" checked> baseline/plateau</label>
+              <label><input type="checkbox" id="bd_overlay_peaks" checked> peak/trough</label>
+              <label><input type="checkbox" id="bd_overlay_regions"> R1..R8 shading</label>
+              <label><input type="checkbox" id="bd_overlay_areas"> area fills</label>
+              <label><input type="checkbox" id="bd_overlay_slope"> plateau slope</label>
+              <label><input type="checkbox" id="bd_overlay_labels"> numeric labels</label>
+            </div>
+          </div>
+          <div id="bd_segment_plot" style="width:100%;height:320px;"></div>
+          <div id="bd_segment_stats" class="bd-stats"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" style="display: none;">
+      <h2 id="sec_baseline">Loadcell baseline (pre-sweep)</h2>
+      <div id="desc_baseline" class="meta">
+        Held-idle window captured after heat-up, before priming. Mean is
+        the static head load; std is the noise floor; drift is the
+        difference between the 2nd-half and 1st-half means (high drift =
+        thermal not yet settled). If mean ≈ 0, the firmware tared; if not,
+        analysis still works (per-window mean-subtraction handles it) but
+        an absolute scale becomes unreadable.
+      </div>
+      <div class="row baseline">
+        <div><span class="meta">mean</span><div id="baseline_mean" class="big small">—</div></div>
+        <div><span class="meta">std</span><div id="baseline_std" class="big small">—</div></div>
+        <div><span class="meta">drift</span><div id="baseline_drift" class="big small">—</div></div>
+        <div><span class="meta">samples</span><div id="baseline_n" class="big small">—</div></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 id="sec_res1">Results — bd_pressure step-response cost</h2>
+      <div id="desc_res1" class="meta">
+        Composite cost = weighted sum of normalised per-K metrics
+        (median over included segments). Sliders adjust weights live —
+        K_opt recomputes without re-running the printer. The per-metric
+        K_opts on the right show whether the metrics agree.
+      </div>
+      <div class="row" style="align-items:flex-start;">
+        <div class="result-block" style="flex:2 1 360px;">
+          <h3>Recommended K (composite argmin)</h3>
+          <div id="bd_k_opt_display" class="big">—</div>
+          <div class="meta">parabolic interp around the cost minimum</div>
+          <div class="bd-weight-sliders" id="bd_weight_sliders"></div>
+          <div id="bd_cost_plot" style="width:100%;height:240px;"></div>
+        </div>
+        <div class="result-block" style="flex:1 1 220px;">
+          <h3>per-metric K_opt</h3>
+          <div class="meta">argmin of each metric in isolation</div>
+          <table id="bd_per_metric_table" class="bd-metric-table"></table>
+        </div>
+      </div>
+      <div id="bd_metric_grid" class="bd-metric-grid"></div>
+    </section>
+
+    <section class="card">
+      <h2 id="sec_res2">Results — linear-fit zero-crossing (comparison)</h2>
+      <div id="desc_res2" class="meta">
+        U1/Snapmaker-style metrics. The integral-area fit uses a 150 ms
+        transition window (≈ one melt-pressure τ) and a per-cycle local
+        mean, and now consumes the SAME bd_pressure-built cycle list, so
+        a cycle the bd analysis excluded (dropouts in the critical zone,
+        sample rate &lt; 40 Hz, signal-below-noise) is excluded here too.
+        Hover a point to see how many cycles survived for that K. Phase-lag
+        and legacy-integral are kept for visual comparison only.
+      </div>
+      <div class="row">
+        <div class="result-block">
+          <h3>Phase-lag fit</h3>
+          <div id="phase_k_opt" class="big">—</div>
+          <div class="meta">slope=<span id="phase_slope">—</span> · R²=<span id="phase_r2">—</span></div>
+          <div id="phase_plot" style="width:100%;height:240px;"></div>
+        </div>
+        <div class="result-block">
+          <h3>Integral-area fit (centered)</h3>
+          <div id="integral_k_opt" class="big">—</div>
+          <div class="meta">slope=<span id="integral_slope">—</span> · R²=<span id="integral_r2">—</span></div>
+          <div id="integral_plot" style="width:100%;height:240px;"></div>
+        </div>
+        <div class="result-block">
+          <h3>Integral (legacy sign(dC/dt))</h3>
+          <div id="integral_legacy_k_opt" class="big">—</div>
+          <div class="meta">slope=<span id="integral_legacy_slope">—</span> · R²=<span id="integral_legacy_r2">—</span></div>
+          <div id="integral_legacy_plot" style="width:100%;height:240px;"></div>
+        </div>
+      </div>
+      <div id="notes" class="notes"></div>
+      
+      <div class="row" style="display: none;">
+        <button id="btn_copy" type="button">Copy M572 S…</button>
+        <span id="copy_status" class="meta"></span>
+      </div>
+    </section>
+  </main>
+
+  <footer style="text-align: center; margin-top: 30px; padding: 20px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted);">
+    Based on the original <a href="https://github.com/CNCKitchen/PrusaPATuner" target="_blank" style="color: var(--accent); text-decoration: none;">PrusaPATuner by CNCKitchen</a>. <br>
+    Modified, optimized for Klipper, and enhanced with preset management by <b style="color: var(--accent);">Vitaliy Zagranichnyy</b>.
+  </footer>
+
+  <script src="/static/app.js"></script>
+
+  <script>
+    function syncVal(srcId, dstId) {
+        document.getElementById(dstId).value = document.getElementById(srcId).value;
+    }
+
+    function updateField(id, val) {
+        const input = document.getElementById(id);
+        if (input) input.value = val;
+        const slider = document.getElementById('slider_' + id);
+        if (slider) slider.value = val;
+    }
+
+    const defaultPresets = {
+        'preset_pla': { label: 'PLA (Standard)', temp: 215, preheat: 225, slow_flow: 1.92, fast_flow: 19.24, slow_vol: 1.92, fast_vol: 4.81, accel: 5000, warmup: 1.0 },
+        'preset_petg': { label: 'PETG (Standard)', temp: 235, preheat: 245, slow_flow: 1.92, fast_flow: 19.24, slow_vol: 1.92, fast_vol: 4.81, accel: 5000, warmup: 1.0 },
+        'preset_tpu': { label: 'TPU / Flex (Aggressive)', temp: 220, preheat: 230, slow_flow: 1.5, fast_flow: 8.0, slow_vol: 3.0, fast_vol: 8.0, accel: 3000, warmup: 2.0 }
+    };
+
+    let userPresets = {};
+
+    async function initPresets() {
+        try {
+            const response = await fetch('/api/presets');
+            if (response.ok) {
+                userPresets = await response.json();
+            } else {
+                userPresets = JSON.parse(JSON.stringify(defaultPresets));
+            }
+        } catch(e) {
+            console.error("Ошибка загрузки пресетов", e);
+            userPresets = JSON.parse(JSON.stringify(defaultPresets));
+        }
+        renderDropdown();
+    }
+
+    async function saveToStorage() {
+        try {
+            await fetch('/api/presets', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(userPresets)
+            });
+        } catch(e) {
+            console.error("Ошибка сохранения пресетов", e);
+        }
+    }
+
+    function renderDropdown(selectedKey = 'custom') {
+        const select = document.getElementById('filament_preset');
+        const isRu = localStorage.getItem('kapat_language') === 'ru';
+        select.innerHTML = `<option value="custom">-- ${isRu ? "Ручная настройка / Не сохранено" : "Custom / Unsaved"} --</option>`;
+        
+        for (const [key, data] of Object.entries(userPresets)) {
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = data.label;
+            select.appendChild(opt);
+        }
+        select.value = selectedKey;
+    }
+
+    function loadPreset() {
+        const key = document.getElementById('filament_preset').value;
+        if (key === 'custom' || !userPresets[key]) return;
+        
+        const data = userPresets[key];
+        document.getElementById('filament_label').value = data.label;
+        updateField('nozzle_temp', data.temp);
+        updateField('preheat_temp', data.preheat);
+        updateField('slow_flow_mm3_s', data.slow_flow);
+        updateField('fast_flow_mm3_s', data.fast_flow);
+        updateField('slow_volume_mm3', data.slow_vol);
+        updateField('fast_volume_mm3', data.fast_vol);
+        updateField('accel_mm_s2', data.accel);
+        updateField('first_slow_leg_factor', data.warmup);
+    }
+
+    function getCurrentInputs() {
+        return {
+            label: document.getElementById('filament_label').value,
+            temp: parseFloat(document.getElementById('nozzle_temp').value),
+            preheat: parseFloat(document.getElementById('preheat_temp').value),
+            slow_flow: parseFloat(document.getElementById('slow_flow_mm3_s').value),
+            fast_flow: parseFloat(document.getElementById('fast_flow_mm3_s').value),
+            slow_vol: parseFloat(document.getElementById('slow_volume_mm3').value),
+            fast_vol: parseFloat(document.getElementById('fast_volume_mm3').value),
+            accel: parseFloat(document.getElementById('accel_mm_s2').value),
+            warmup: parseFloat(document.getElementById('first_slow_leg_factor').value)
+        };
+    }
+
+    async function saveCurrentPreset() {
+        const key = document.getElementById('filament_preset').value;
+        if (key === 'custom') {
+            saveAsNewPreset();
+            return;
+        }
+        userPresets[key] = getCurrentInputs();
+        userPresets[key].label = document.getElementById('filament_label').value; 
+        await saveToStorage();
+        renderDropdown(key);
+        
+        const btn = event.target;
+        btn.textContent = "✅ Saved!";
+        setTimeout(() => { btn.textContent = "💾 Save"; setLang(localStorage.getItem('kapat_language') || 'ru'); }, 1000);
+    }
+
+    async function saveAsNewPreset() {
+        let defaultName = document.getElementById('filament_label').value;
+        if (defaultName === 'PLA' || defaultName === 'PETG') defaultName += ' (Copy)';
+        
+        let newName = prompt("Enter a name for the new preset:", defaultName);
+        if (!newName || newName.trim() === "") return;
+        
+        const newKey = 'preset_' + Date.now();
+        const newData = getCurrentInputs();
+        newData.label = newName;
+        
+        userPresets[newKey] = newData;
+        await saveToStorage();
+        renderDropdown(newKey);
+        document.getElementById('filament_label').value = newName;
+    }
+
+    async function renamePreset() {
+        const key = document.getElementById('filament_preset').value;
+        if (key === 'custom') return;
+        
+        let newName = prompt("Enter new name for this preset:", userPresets[key].label);
+        if (!newName || newName.trim() === "") return;
+        
+        userPresets[key].label = newName;
+        document.getElementById('filament_label').value = newName;
+        await saveToStorage();
+        renderDropdown(key);
+    }
+
+    async function deletePreset() {
+        const key = document.getElementById('filament_preset').value;
+        if (key === 'custom') return;
+        
+        if (confirm(`Are you sure you want to delete the preset "${userPresets[key].label}"?`)) {
+            delete userPresets[key];
+            await saveToStorage();
+            renderDropdown('custom');
+        }
+    }
+
+    function clearNpzFiles() {
+        const isRu = localStorage.getItem('kapat_language') === 'ru';
+        const msg = isRu ? "Вы уверены, что хотите удалить ВСЕ сохраненные .npz файлы с сервера?" : "Are you sure you want to delete ALL saved .npz files from the server?";
+        
+        if (confirm(msg)) {
+            fetch('/api/clear_npz', { method: 'POST' })
+            .then(response => {
+                if (response.ok) {
+                    alert(isRu ? "Файлы успешно удалены!" : "Files deleted successfully!");
+                    document.getElementById('btn_replay_refresh').click();
+                } else {
+                    alert(isRu ? "Ошибка. Добавьте обработчик /api/clear_npz в ваш Python-сервер." : "Error. Make sure you added the /api/clear_npz route to your Python server.");
+                }
+            }).catch(err => {
+                console.error(err);
+                alert("Network error.");
+            });
+        }
+    }
+  </script>
+
+  <script>
+    const i18n = {
+        'title_main': {
+            en: { text: "Klipper Auto Pressure Advance Tuning", tooltip: "" },
+            ru: { text: "Klipper Auto Pressure Advance Tuning", tooltip: "" }
+        },
+        'title_sub': {
+            en: { text: "Loadcell-based automatic Pressure Advance calibration for Klipper.", tooltip: "" },
+            ru: { text: "Loadcell-based automatic Pressure Advance calibration for Klipper.", tooltip: "" }
+        },
+        'sec1_title': { en: { text: "1. Printer", tooltip: "" }, ru: { text: "1. Принтер", tooltip: "" }},
+        'sec2_title': { en: { text: "2. Filament & temps", tooltip: "" }, ru: { text: "2. Пластик и Температуры", tooltip: "" }},
+        'sec3_title': { en: { text: "3. Sweep parameters", tooltip: "" }, ru: { text: "3. Параметры теста", tooltip: "" }},
+        
+        'lbl_preset': { en: { text: "Filament Preset:", tooltip: "" }, ru: { text: "Пресет пластика:", tooltip: "" }},
+        'btn_preset_save': { en: { text: "💾 Save", tooltip: "" }, ru: { text: "💾 Сохранить", tooltip: "" }},
+        'btn_preset_new': { en: { text: "➕ Save As New", tooltip: "" }, ru: { text: "➕ Как новый", tooltip: "" }},
+        'btn_preset_rename': { en: { text: "✏️ Rename", tooltip: "" }, ru: { text: "✏️ Переименовать", tooltip: "" }},
+        'btn_preset_del': { en: { text: "🗑️ Delete", tooltip: "" }, ru: { text: "🗑️ Удалить", tooltip: "" }},
+        
+        'lbl_temp': { en: { text: "Test temp °C", tooltip: "" }, ru: { text: "Температура теста °C", tooltip: "" }},
+        'lbl_preheat': { en: { text: "Preheat °C", tooltip: "" }, ru: { text: "Преднагрев °C", tooltip: "" }},
+        
+        'lbl_slow_flow': {
+            en: { text: "Slow flow (mm³/s)", tooltip: "Volumetric flow rate for the slow baseline segments." },
+            ru: { text: "Медленный поток (мм³/с)", tooltip: "Скорость экструзии во время 'медленных' участков линии." }
+        },
+        'lbl_fast_flow': {
+            en: { text: "Fast flow (mm³/s)", tooltip: "Volumetric flow rate during the fast extrusion segments." },
+            ru: { text: "Быстрый поток (мм³/с)", tooltip: "Скорость экструзии во время 'быстрых' участков (имитация рывка)." }
+        },
+        'lbl_slow_vol': {
+            en: { text: "Slow volume (mm³)", tooltip: "Volume of plastic extruded during the slow phase." },
+            ru: { text: "Объем медленной фазы (мм³)", tooltip: "Определяет длину/время медленного участка. Для ТПУ увеличьте в 2 раза." }
+        },
+        'lbl_fast_vol': {
+            en: { text: "Fast volume (mm³)", tooltip: "Volume of plastic extruded during the fast phase." },
+            ru: { text: "Объем быстрой фазы (мм³)", tooltip: "Определяет длину/время быстрого участка." }
+        },
+        'lbl_accel': {
+            en: { text: "Accel (mm/s²)", tooltip: "Extruder acceleration during velocity transitions." },
+            ru: { text: "Ускорение (мм/с²)", tooltip: "Резкость 'гидроудара'. Для жестких 5000, для мягких (ТПУ) 1000-3000." }
+        },
+        'lbl_warmup': {
+            en: { text: "First slow-leg factor (warm-up)", tooltip: "K[0] cycle 0's first slow extrusion is multiplied by this factor to establish steady-state melt pressure before the first fast transition. Set to 1 to disable." },
+            ru: { text: "Множитель прогрева (первый шаг)", tooltip: "Увеличивает длину самого первого медленного участка, чтобы сбросить давление в сопле перед тестом. Для ТПУ ставьте 2.0 или 3.0." }
+        },
+        'lbl_replay': { en: { text: "Replay a saved run", tooltip: "" }, ru: { text: "Загрузить старый тест (.npz)", tooltip: "" }},
+        'sec_live': { en: { text: "Live loadcell", tooltip: "" }, ru: { text: "Тензодатчик (Реальное время)", tooltip: "" }},
+        'sec_browser': { en: { text: "bd_pressure segment browser", tooltip: "" }, ru: { text: "Просмотр сегментов (bd_pressure)", tooltip: "" }},
+        'desc_browser': { 
+            en: { text: "Step through every low-high-low segment (low_n + high_n + low_{n+1}) and inspect what the analyser saw. Click a K on the left to focus it; use prev/next buttons or ← / → keys to step through that K's segments. Segments excluded by the auto-quality gate are flagged with the reason.", tooltip: "" }, 
+            ru: { text: "Просматривайте каждый сегмент скачка скорости и смотрите, что видит алгоритм. Кликните на значение K слева; используйте кнопки или стрелки ← / → на клавиатуре. Сегменты с ошибками исключаются алгоритмом автоматически с указанием причины.", tooltip: "" }
+        },
+        'sec_res1': { en: { text: "Results — bd_pressure step-response cost", tooltip: "" }, ru: { text: "Результаты — Оценка отклика (bd_pressure)", tooltip: "" }},
+        'desc_res1': { 
+            en: { text: "Composite cost = weighted sum of normalised per-K metrics. Sliders adjust weights live — K_opt recomputes without re-running the printer.", tooltip: "" }, 
+            ru: { text: "Комплексная оценка = взвешенная сумма метрик для каждого K. Ползунки меняют вес метрик в реальном времени — идеальный K (K_opt) пересчитывается без перезапуска принтера.", tooltip: "" }
+        },
+        'sec_res2': { en: { text: "Results — linear-fit zero-crossing (comparison)", tooltip: "" }, ru: { text: "Сравнение — Альтернативные методы (Integral)", tooltip: "" }},
+        'desc_res2': { 
+            en: { text: "U1/Snapmaker-style metrics. The integral-area fit uses a 150 ms transition window and a per-cycle local mean.", tooltip: "" }, 
+            ru: { text: "Альтернативные метрики в стиле Snapmaker. Метод 'Integral-area' использует окно в 150 мс для поиска точки, где площадь ошибки равна нулю.", tooltip: "" }
+        }
+    };
+
+    function setLang(lang) {
+        localStorage.setItem('kapat_language', lang);
+        renderDropdown(document.getElementById('filament_preset').value);
+
+        const btnEn = document.getElementById('btn_lang_en');
+        const btnRu = document.getElementById('btn_lang_ru');
+        if (lang === 'en') {
+            btnEn.style.borderColor = 'var(--accent)';
+            btnRu.style.borderColor = 'var(--border)';
+        } else {
+            btnEn.style.borderColor = 'var(--border)';
+            btnRu.style.borderColor = 'var(--accent)';
+        }
+
+        for (const [id, data] of Object.entries(i18n)) {
+            const el = document.getElementById(id);
+            if (el) {
+                if(el.tagName === 'BUTTON') {
+                    el.innerText = data[lang].text;
+                } else {
+                    el.innerText = data[lang].text;
+                }
+                
+                if (data[lang].tooltip) {
+                    el.title = data[lang].tooltip;
+                    el.style.borderBottom = "1px dotted var(--muted)";
+                    el.style.cursor = "help";
+                } else {
+                    el.title = "";
+                    el.style.borderBottom = "none";
+                    el.style.cursor = "default";
+                }
+            }
+        }
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+        await initPresets(); 
+        const savedLang = localStorage.getItem('kapat_language') || 'ru';
+        setLang(savedLang); 
+    });
+  </script>
+</body>
+</html>

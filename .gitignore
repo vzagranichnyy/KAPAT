@@ -1,0 +1,11 @@
+# Python environment
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# KAPAT specific data
+runs/*.npz
+presets.json

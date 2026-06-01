@@ -242,11 +242,13 @@
           </div>
         </section>
       </div>
-    </div> <section class="card actions">
-      <button id="btn_save" type="button" id="btn_action_save">Save config</button>
+    </div> 
+    
+    <section class="card actions">
+      <button id="btn_save" type="button">Save config</button>
       <button id="btn_preview" type="button" style="display: none;">Preview G-code</button>
-      <button id="btn_run" type="button" class="primary" id="btn_action_run">Start tuning run</button>
-      <button id="btn_cancel" type="button" class="danger" style="display: none;">Cancel</button>
+      <button id="btn_run" type="button" class="primary">Start tuning run</button>
+      <button id="btn_cancel" type="button" class="danger" style="display: inline-block; font-weight: bold; background-color: #d9534f; color: white;" onclick="stopTuning()">🚨 СТОП / CANCEL</button>
       
       <label class="replay-picker">
         <span id="lbl_replay">Replay a saved run</span>
@@ -561,6 +563,31 @@
             });
         }
     }
+    
+    async function stopTuning() {
+        const isRu = localStorage.getItem('kapat_language') === 'ru';
+        const msg = isRu ? "Экстренно остановить печать и отменить калибровку?" : "Emergency stop printing and abort calibration?";
+        
+        if (confirm(msg)) {
+            let host = document.getElementById('printer_host').value.trim();
+            if (!host) {
+                host = window.location.hostname; 
+            }
+
+            try {
+                const response = await fetch(`http://${host}:7125/printer/print/cancel`, { method: 'POST' });
+                if (response.ok) {
+                    alert(isRu ? "🛑 Команда отмены успешно отправлена в Klipper!" : "🛑 Cancel command sent to Klipper!");
+                } else {
+                    throw new Error("Moonraker rejected the request");
+                }
+            } catch (err) {
+                console.error("Ошибка при прямой отправке в Moonraker:", err);
+                fetch('/api/cancel', { method: 'POST' }).catch(e => console.log(e));
+                alert(isRu ? "Команда отправлена через сервер." : "Sent via server backend.");
+            }
+        }
+    }
   </script>
 
   <script>
@@ -626,6 +653,10 @@
         'desc_res2': { 
             en: { text: "U1/Snapmaker-style metrics. The integral-area fit uses a 150 ms transition window and a per-cycle local mean.", tooltip: "" }, 
             ru: { text: "Альтернативные метрики в стиле Snapmaker. Метод 'Integral-area' использует окно в 150 мс для поиска точки, где площадь ошибки равна нулю.", tooltip: "" }
+        },
+        'btn_cancel': { 
+            en: { text: "🚨 STOP / CANCEL", tooltip: "Abort the current print" }, 
+            ru: { text: "🚨 ЭКСТРЕННЫЙ СТОП", tooltip: "Прервать текущую печать" }
         }
     };
 

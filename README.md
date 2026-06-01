@@ -2,7 +2,7 @@
 
 **KAPAT** is a loadcell-based automatic Pressure Advance calibration tool for Klipper, based on the original [PrusaPATuner by CNCKitchen](https://github.com/CNCKitchen/PrusaPATuner).
 
-Unlike traditional visual calibration, this tool directly measures the pressure inside the nozzle using a loadcell (Strain Gauge) to calculate the optimal Pressure Advance value.
+Unlike traditional visual calibration, this tool directly measures the pressure inside the nozzle using a loadcell (Strain Gauge) to calculate the optimal Pressure Advance value. This tool was successfully tested and verified to work on a **Mellow Alps** extruder flashed with Klipper.
 
 This fork features a **completely redesigned, modern, two-column UI**, optimized specifically for Klipper, with built-in filament preset management and an intuitive workflow.
 
@@ -14,6 +14,7 @@ This fork features a **completely redesigned, modern, two-column UI**, optimized
 
 ## Features
 * **Klipper Native:** Fully adapted for Moonraker/Klipper API.
+* **Hardware Tested:** Confirmed compatibility with the **Mellow ALPS pressure module (ADS131M02)** on Klipper firmware.
 * **Modern UI:** Sleek dark theme with dual-column layout and intuitive sliders.
 * **Preset Management:** Save and load your filament settings directly from the web interface.
 * **Real-time Analytics:** Smooth live loadcell graph and per-segment step-response analysis.
@@ -55,12 +56,13 @@ Open `http://<your-pi-ip>:8000` in your browser to access the dashboard.
 
 **KAPAT** — это инструмент автоматической калибровки Pressure Advance для Klipper с использованием тензодатчика (loadcell), основанный на оригинальном проекте [PrusaPATuner от CNCKitchen](https://github.com/CNCKitchen/PrusaPATuner).
 
-В отличие от традиционной визуальной калибровки (печати линий или башен), этот инструмент напрямую измеряет давление внутри сопла с помощью тензодатчика для вычисления оптимального значения Pressure Advance.
+В отличие от традиционной визуальной калибровки (печати линий или башен), этот инструмент напрямую измеряет давление внутри сопла с помощью тензодатчика для вычисления оптимального значения Pressure Advance. Инструмент успешно протестирован и стабильно работает на экструдере **Mellow Alps**, прошитом на Klipper.
 
 Этот форк (версия) включает в себя **полностью переработанный, современный интерфейс в две колонки**, специально оптимизированный для Klipper, со встроенным управлением пресетами для пластика и интуитивно понятным рабочим процессом.
 
 ## Особенности
 * **Нативная работа с Klipper:** Полная адаптация под API Moonraker/Klipper.
+* **Аппаратная совместимость: Проверена и подтверждена работа с Mellow ALPS pressure module (ADS131M02) на прошивке Klipper.
 * **Современный интерфейс:** Стильная темная тема с двухколоночной компоновкой и удобными ползунками.
 * **Управление пресетами:** Сохраняйте и загружайте настройки для разных типов пластика прямо из веб-интерфейса.
 * **Аналитика в реальном времени:** Плавный график показаний тензодатчика в реальном времени и детальный анализ каждого сегмента теста.

@@ -21,18 +21,29 @@ This fork features a **completely redesigned, modern, two-column UI**, optimized
 * **Replay Engine:** Re-analyze previously recorded telemetry logs without heating up the printer.
 
 ## Installation & Usage
-1. Clone this repository to your Klipper host (e.g., Raspberry Pi).
-2. Copy the Python script from the `klipper_extras` folder into your `~/klipper/klippy/extras/` directory.
-3. Include the provided `kapat.cfg` macro in your Klipper `printer.cfg`.
-4. Install the required Python dependencies:
-   ```bash
-pip install -r requirements.txt
 
-Run the FastAPI server:
+The easiest way to install KAPAT and all its dependencies on your Klipper host (Raspberry Pi, CB2, etc.) is using the automated installation script. 
 
-uvicorn app:app --host 0.0.0.0 --port 8000
+Connect to your host via SSH and run this single command:
 
-6. Open `http://<your-pi-ip>:8000` in your browser to access the dashboard.
+```bash
+curl -sSL [https://raw.githubusercontent.com/vzagranichnyy/KAPAT/main/install.sh](https://raw.githubusercontent.com/vzagranichnyy/KAPAT/main/install.sh) | bash
+```
+
+The script will automatically:
+1. Download the repository.
+2. Create an isolated Python virtual environment (safe for Debian Bookworm).
+3. Install all required dependencies (`fastapi`, `numpy`, `scipy`, etc.).
+4. Copy the Klipper extra modules to the correct directory and restart Klipper.
+5. Setup a background service so the KAPAT web dashboard starts automatically on boot.
+
+**Important:** After installation, don't forget to include the provided macro in your `printer.cfg`:
+
+```cfg
+[include kapat.cfg]
+```
+
+Open `http://<your-pi-ip>:8000` in your browser to access the dashboard.
 
 ## Credits
 * **Original Concept & Math:** [Stefan (CNCKitchen)](https://github.com/CNCKitchen).
@@ -57,18 +68,29 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 * **Движок повторов (Replay):** Проводите повторный анализ ранее записанных логов телеметрии без необходимости снова нагревать принтер и тратить пластик.
 
 ## Установка и использование
-1. Склонируйте этот репозиторий на ваш хост Klipper (например, на Raspberry Pi).
-2. Скопируйте Python-скрипт из папки `klipper_extras` в вашу директорию `~/klipper/klippy/extras/`.
-3. Подключите файл с макросом `kapat.cfg` в ваш основной конфигурационный файл Klipper `printer.cfg` (через команду include).
-4. Установите необходимые зависимости Python:
-   ```bash
-pip install -r requirements.txt
 
-Запустите сервер FastAPI:
+Самый простой способ установить KAPAT и все его зависимости на ваш хост Klipper (Raspberry Pi, CB2 и т.д.) — использовать скрипт автоматической установки.
 
-uvicorn app:app --host 0.0.0.0 --port 8000
+Подключитесь к вашему хосту по SSH и выполните эту команду:
 
-6. Откройте `http://<your-pi-ip>:8000` в браузере для доступа к панели управления.
+```bash
+curl -sSL [https://raw.githubusercontent.com/vzagranichnyy/KAPAT/main/install.sh](https://raw.githubusercontent.com/vzagranichnyy/KAPAT/main/install.sh) | bash
+```
+
+Скрипт автоматически:
+1. Скачает репозиторий.
+2. Создаст изолированное виртуальное окружение Python (безопасно для новых ОС Debian Bookworm).
+3. Установит все необходимые библиотеки (`fastapi`, `numpy`, `scipy` и т.д.).
+4. Скопирует модули в папку Klipper и перезапустит службу Klipper.
+5. Настроит фоновую службу, чтобы веб-сервер KAPAT запускался автоматически при включении принтера.
+
+**Важно:** После установки не забудьте добавить макрос в ваш `printer.cfg`:
+
+```cfg
+[include kapat.cfg]
+```
+
+Откройте `http://<IP-адрес-вашего-принтера>:8000` в браузере для доступа к панели управления.
 
 ## Авторы
 * **Оригинальная концепция и математика:** [Stefan (CNCKitchen)](https://github.com/CNCKitchen).
@@ -76,6 +98,3 @@ uvicorn app:app --host 0.0.0.0 --port 8000
 
 ## License
 This project is open-source and builds upon the original work by CNCKitchen. Please refer to the `LICENSE` file in this repository for specific terms and conditions.
-
-
-

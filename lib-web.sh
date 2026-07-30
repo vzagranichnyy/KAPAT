@@ -44,12 +44,26 @@ deploy_kapat_web() {
     echo "    - $site_conf already has a /kapat/ location -- leaving it alone"
     return 0
   fi
-  local block
-  block="$(printf '%s\n    location = /kapat {\n        default_type text/html;\n        alias %s/index.html;\n    }\n    location /kapat/ {\n        alias %s/;\n        try_files $uri $uri/ /kapat/index.html;\n    }\n    %s\n' \
-    "$NGINX_MARKER_BEGIN" "$KAPAT_WEB_DIR" "$KAPAT_WEB_DIR" "$NGINX_MARKER_END")"
-  sudo sed -i "/^server {/a\\
-$block" "$site_conf"
-  if sudo nginx -t 2>/dev/null; then
+  # Written to a temp file and inserted with sed's `r` (read file) command
+  # rather than interpolating a multi-line string into an `a\` command --
+  # `a\` needs each line individually backslash-continued, which broke
+  # ("extra characters after command") the first time this was tried
+  # against a real nginx site config. `r` just dumps a whole file after
+  # the matched line, no per-line escaping to get wrong.
+  local block_file
+  block_file="$(mktemp)"
+  printf '    %s\n    location = /kapat {\n        default_type text/html;\n        alias %s/index.html;\n    }\n    location /kapat/ {\n        alias %s/;\n        try_files $uri $uri/ /kapat/index.html;\n    }\n    %s\n' \
+    "$NGINX_MARKER_BEGIN" "$KAPAT_WEB_DIR" "$KAPAT_WEB_DIR" "$NGINX_MARKER_END" > "$block_file"
+  sudo sed -i "/^server {/r $block_file" "$site_conf"
+  rm -f "$block_file"
+  # Verify the insert actually landed before claiming success -- a prior
+  # version of this trusted `sed`'s exit unconditionally and reported
+  # success even when the edit had silently failed.
+  if ! grep -q "$NGINX_MARKER_BEGIN" "$site_conf" 2>/dev/null; then
+    echo "    X failed to insert the /kapat location into $site_conf -- add it by hand:"
+    echo "        location = /kapat { default_type text/html; alias $KAPAT_WEB_DIR/index.html; }"
+    echo "        location /kapat/ { alias $KAPAT_WEB_DIR/; try_files \$uri \$uri/ /kapat/index.html; }"
+  elif sudo nginx -t 2>/dev/null; then
     sudo systemctl reload nginx 2>/dev/null || sudo nginx -s reload 2>/dev/null
     echo "    v added /kapat location to $site_conf and reloaded nginx"
   else

@@ -193,10 +193,24 @@ if [ "$ASSUME_YES" -ne 1 ]; then
     mainsail) echo "      Web UI         -> $MAINSAIL_DIR (Mainsail+KAPAT fork, replaces what's there)" ;;
     both)     echo "      Web UI         -> both $KAPAT_WEB_DIR (/kapat/) and $MAINSAIL_DIR" ;;
   esac
-  read -r -p "    Continue? [y/N] " reply
+  printf "    Continue? [y/N] "
+  IFS= read -r reply
+  # Normalize hard before matching: strip \r (some serial/web-console
+  # terminals send it), trim whitespace, lowercase -- a bare `[Yy]*` case
+  # match has previously failed to fire on at least one board's terminal
+  # for reasons never root-caused (typed "y" was echoed back but the
+  # prompt still aborted). Matching an exact "y"/"yes" after normalizing
+  # is more defensive, and printing the normalized value in the abort
+  # message means a repeat of that bug is diagnosable instead of a
+  # repeat mystery.
+  reply="$(printf '%s' "$reply" | tr -d '\r' | tr '[:upper:]' '[:lower:]' | xargs 2>/dev/null)"
   case "$reply" in
-    [Yy]*) ;;
-    *) echo "Aborted, nothing changed."; exit 0 ;;
+    y|yes) ;;
+    *)
+      echo "Aborted, nothing changed. (read back: \"$reply\")"
+      [ -z "$reply" ] || echo "If you did type y/yes, rerun with --yes and please report this."
+      exit 0
+      ;;
   esac
 fi
 

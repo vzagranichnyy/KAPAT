@@ -57,10 +57,16 @@ echo "    (your saved profiles/history/captures)"
 echo ""
 
 if [ "$ASSUME_YES" -ne 1 ]; then
-  read -r -p "    Continue? [y/N] " reply
+  printf "    Continue? [y/N] "
+  IFS= read -r reply
+  reply="$(printf '%s' "$reply" | tr -d '\r' | tr '[:upper:]' '[:lower:]' | xargs 2>/dev/null)"
   case "$reply" in
-    [Yy]*) ;;
-    *) echo "Aborted, nothing changed."; exit 0 ;;
+    y|yes) ;;
+    *)
+      echo "Aborted, nothing changed. (read back: \"$reply\")"
+      [ -z "$reply" ] || echo "If you did type y/yes, rerun with --yes and please report this."
+      exit 0
+      ;;
   esac
 fi
 

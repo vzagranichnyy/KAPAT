@@ -50,6 +50,8 @@ doesn't lose any data.
 ## Install
 
 ```bash
+git clone https://github.com/vzagranichnyy/KAPAT.git
+cd KAPAT
 ./install.sh                  # KAPAT web UI at /kapat/ (default)
 ./install.sh --web=mainsail   # Mainsail+KAPAT instead (replaces $HOME/mainsail)
 ./install.sh --web=both       # both

@@ -1,0 +1,1 @@
+import{F as e}from"./_plugin-vue2_normalizer-BzgDz6J-.js";function t(t){return e(function(e,n){e.computed=e.computed||{},e.computed[n]={cache:!1,get:function(){return this.$refs[t||n]}}})}export{t};

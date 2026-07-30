@@ -1,0 +1,31 @@
+# Example printer.cfg snippet for KAPAT.
+#
+# Prerequisite: a working [load_cell] or [load_cell_probe], calibrated
+# with LOAD_CELL_CALIBRATE. KAPAT resolves it automatically (same
+# resolution order as autopa: [probe]'s private load cell, else a bare
+# [load_cell]) — no need to name it here.
+
+[kapat]
+# All of these can be overridden per-run as KAPAT_SWEEP gcode params
+# (VFR=, VFR_LOW=, etc. — see KAPAT_SWEEP's help text).
+vfr: 19.24              # fast leg flow, mm^3/s
+vfr_low: 1.92           # slow leg flow, mm^3/s
+tslow: 1.0              # slow leg duration, s
+tfast: 0.25             # fast leg duration, s
+cycles: 8               # slow/fast cycles per K
+kstart: 0.0
+kend: 0.08
+kstep: 0.005
+warmup: 4.0             # first slow leg is this many x longer (melt warm-up)
+wobble_axis: Y          # X or Y — whichever doesn't foul your setup at rest
+wobble: 0.05            # mm — small axis move each leg (required: Klipper
+                        # only applies pressure advance to moves with X/Y
+                        # component, see kapat/__init__.py's module header)
+accel: 1000             # toolhead accel during the sweep (restored after)
+apply: True             # apply the found K live when the sweep finishes
+
+# Sweep bursts use a large extrude-to-travel ratio (tiny wobble, fast
+# extrusion) — raise this or KAPAT_SWEEP will refuse to run and tell you
+# the exact value it needs.
+[extruder]
+max_extrude_cross_section: 200

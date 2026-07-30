@@ -22,18 +22,337 @@ legacy. Everything under "Two UIs on this one printer" is now the
 primary reference; the standalone-SPA sections further down are kept
 for history/context but are no longer where active work happens.
 
-There are now **two separate installs** of this project:
+**Decision (2026-07-30, later the same day): a third interface,
+`kapat-vue`, was built and is now the primary deliverable — and this
+project is published to GitHub.** See "Third interface: standalone
+kapat-vue + GitHub publishing" below for the full story. Short version:
+- `/home/pi/kapat-vue` — a brand-new standalone Vue 2 + Vuetify app,
+  visually identical to the KAPAT tab inside the Mainsail fork (same
+  components, copied byte-for-byte where possible), but as its own
+  full-screen page with no Mainsail sidebar/chrome around it. This is
+  now what's actually deployed at `http://<host>/kapat/` on this
+  machine — **the old Svelte SPA (`web/src/` as described throughout
+  most of this file) has been deleted entirely**, both from this
+  machine's nginx deployment and from the `KAPAT` GitHub repo's
+  contents. Treat every mention of the Svelte app below this point as
+  historical only; it no longer exists anywhere.
+- This repo (`/home/pi/KAPAT`) is now published at
+  [github.com/vzagranichnyy/KAPAT](https://github.com/vzagranichnyy/KAPAT),
+  restructured around two **pre-built** web UIs (`web-dist/` = kapat-vue,
+  `mainsail-dist/` = the Mainsail+KAPAT fork) instead of the old Svelte
+  source tree — see that section for `install.sh`'s new `--web=`
+  flag and the new `switch-web.sh`/`uninstall.sh` scripts.
+- The Mainsail fork (`/home/pi/mainsail-src`) is separately published at
+  [github.com/vzagranichnyy/Mainsail-Kapat](https://github.com/vzagranichnyy/Mainsail-Kapat).
+- A private full-tree backup (source + `node_modules`, everything) lives
+  at [github.com/vzagranichnyy/KAPAT_code](https://github.com/vzagranichnyy/KAPAT_code)
+  (private repo) — re-synced on request, not automatically kept current.
+
+There are now **three separate installs** of this project:
 
 1. **This machine** (`pi@` on this CB2, working dir `/home/pi/KAPAT`) —
    the dev copy. Everything below "Rebuild/redeploy workflow" onward
-   describes this host unless stated otherwise.
+   describes this host's *historical* Svelte-era state unless stated
+   otherwise — re-read the kapat-vue section above first, since the
+   actually-deployed web UI has since changed out from under most of
+   that narrative.
 2. **A second printer** (`biqu@bigtreetech-cb2`, a *different* physical
    board that happens to share the same default BTT hostname) — set up
-   this session by tar'ing this repo up and running `install.sh` there.
+   earlier by tar'ing this repo up and running `install.sh` there.
    See "Second install: biqu@bigtreetech-cb2" below for its
    install-specific state; that machine is not reachable from this
    session, so anything about its live status is only as good as what
    the user has reported back in chat.
+3. **A third machine, `pi@mainsailos`** (a MainsailOS-imaged box,
+   Klipper at `/home/pi/klipper`, klippy-env Python 3.9) — installed
+   this session via `git clone` + `./install.sh` from the freshly
+   published `KAPAT` repo, entirely over chat (this session has no
+   direct access to it either; same caveat as biqu's box applies). This
+   install is where the three real `install.sh` bugs described in the
+   kapat-vue/GitHub section below were actually found and fixed — see
+   that section, don't re-debug them from scratch if they look familiar.
+
+## Third interface: standalone kapat-vue + GitHub publishing
+
+### Why a third interface
+
+After the Mainsail-fork KAPAT tab (see "Two UIs on this one printer"
+below) was working and polished, the user asked for a *third*, fully
+standalone version: take the KAPAT tab's design exactly as-is and turn
+it into its own Vue app — full-screen, no Mainsail sidebar/topbar around
+it, just the calibration UI — plus a language switcher (not present in
+the Mainsail-fork tab itself, added new in the app shell around it).
+
+### Where it lives and how it's built
+
+`/home/pi/kapat-vue` — Vue 2.7 + Vuetify 2 + `vue-class-component`, Vite
+8 (the same rolldown-backed Vite version as `mainsail-src`), built with
+`PATH=/home/pi/node20/bin:$PATH npm run build` (system Node 18.20.4 is
+too old, same as `mainsail-src`).
+
+**Every `Kapat*.vue` component and every `kapat*.ts` lib file was copied
+byte-for-byte** from `mainsail-src` — confirmed via grep that none of
+them touch `$store`/`$socket`/`$vuetify` except in the few specific
+spots enumerated below, so this was almost entirely a matter of
+figuring out *exactly* what infrastructure those files lean on, and
+reproducing the minimum of it standalone (not reusing Mainsail's full
+Vuex store, which would have meant embedding most of Mainsail anyway):
+
+- `Panel.vue`, `NumberInput.vue`, `ConfirmationDialog.vue` — copied
+  near-verbatim (same template/CSS). `Panel.vue`'s collapse-state
+  persistence was rewired from Mainsail's Vuex `gui/getPanelExpand` +
+  Moonraker-database round-trip to plain `localStorage` — same visible
+  behavior, no store needed.
+- `BaseMixin` — trimmed to just `isMobile`/`isTablet`/`isDesktop`/
+  `isWidescreen`/`viewport` (pure `$vuetify.breakpoint` reads). Grepping
+  every copied file confirmed these are the *only* BaseMixin members
+  anything actually calls — the real BaseMixin's dozens of other Vuex-
+  backed getters (klippy state, power devices, print stats, etc.) are
+  unused dead weight for this app.
+- **The one genuinely new piece of infrastructure**: `kapatMoonraker.ts`,
+  a minimal standalone Moonraker JSON-RPC client (`printer.objects.subscribe`
+  on `extruder`/`toolhead`/`kapat`, plus `printer.gcode.script`). Needed
+  because `Kapat.vue` itself (unlike every child component) *does* read
+  `$store.state.printer.{kapat,extruder,toolhead}` and call
+  `$socket.emitAndWait('printer.gcode.script', ...)` directly, for the
+  auto-home/auto-heat preflight sequence and live sweep-status polling.
+  This connects to the *normal* `ws://<host>/websocket` (nginx-proxied,
+  same port as the page itself) — completely separate from
+  `kapatBridge.ts`'s raw `:7125/klippysocket` connection, which was
+  already self-contained and needed zero changes (`KlippyBridge` already
+  defaults to `window.location.hostname`, so it "just works" as long as
+  the app is served from the same host as the printer).
+- `KapatLiveChart.vue`'s three view-preference settings (smoothing
+  toggle, avg window, buffer seconds) — same `localStorage` treatment
+  as `Panel.vue`'s collapse state, replacing Mainsail's
+  `gui/saveSetting`.
+- App shell (`App.vue`, new file, no Mainsail equivalent): just
+  `<v-app>` → `<v-main>` → the Kapat page, plus a small fixed-position
+  globe-icon button opening a language menu (`vue-i18n`, `en`/`ru`,
+  persisted to `localStorage`). Locale JSON files are trimmed to just
+  the `Kapat.*` / `App.NumberInput.*` / `Buttons.Cancel` keys actually
+  used, not Mainsail's full translation file.
+
+### Two real build-toolchain bugs found getting this to actually run
+
+Both were invisible until the built bundle was tested for real (`vite
+build` succeeded cleanly both times, no errors) — caught only by trying
+to load the page in a browser and by running `node --check`/`acorn` on
+the raw output bundle:
+
+1. **Vite 8's Oxc-based TS transform doesn't auto-detect
+   `experimentalDecorators` from `tsconfig.json`** the way esbuild used
+   to. Without an explicit opt-in, `@Component`-decorated *plain `.ts`
+   files* (just `base.ts` here — every other decorated class lives
+   inside a `.vue` SFC, which apparently goes through a different path)
+   were left with raw, untransformed decorator syntax in the output —
+   `var mm=@lm class extends U{...}`, invalid at runtime, threw
+   `SyntaxError: Invalid or unexpected token` the instant the browser
+   tried to load the bundle, which manifested as a **silent, no-console-
+   error blank page** (the very first script-tag parse failure happened
+   before any of the app's own error handling could run). Root-caused
+   by downloading the built bundle and running `node --check` on it,
+   then `acorn.parse()` for an exact byte offset — pointed straight at
+   `BaseMixin`'s `@Component` line. Fix: found the *exact* answer
+   already sitting in `mainsail-src/vite.config.ts` (with its own
+   comment explaining the same thing) —
+   ```ts
+   oxc: { decorator: { legacy: true } }
+   ```
+2. **Vite's default `base: '/'` bakes absolute `/assets/...` paths into
+   the build**, which 404s the instant the app is served from a
+   subpath (`/kapat/`, or `/kapat-vue/` during the period it briefly
+   lived there — see below) instead of domain root. Fix: set
+   `base: '/kapat/'` in `vite.config.ts`, matching wherever it's
+   *actually* deployed at build time — this means **the dist output is
+   deployment-path-specific and must be rebuilt if the path changes**
+   (bit exactly this when the app was later renamed from `/kapat-vue/`
+   to `/kapat/`, see below).
+
+### One real runtime bug: stale computed getter/setter pairs
+
+Found *after* deploying and the user reporting "sections don't collapse
+any more, and Analysis looks incomplete." Root cause, confirmed by
+injected-JS inspection of the live Vue instance: `Panel.vue`'s `expand`
+was a `get`/`set` pair backed by a separate private field (`_expand`) —
+the setter updated `_expand` correctly (confirmed directly), but the
+*getter* the template reads back stayed stuck on the old value. Same
+shape of bug as the two decorator issues above — something about how
+this specific Vite/Oxc toolchain compiles class fields + computed
+accessor pairs together doesn't preserve Vue's reactivity link between
+them, even though the identical get/set-pair-over-a-private-field
+pattern is used throughout `mainsail-src` itself without any problem
+there (different toolchain config, most likely the same `oxc.decorator.legacy`
+interaction, though never root-caused further than "avoid the pattern").
+**Fix, and the pattern to use from now on in this specific project**:
+plain reactive field (`expand = true`), toggled directly, persisted via
+a separate `@Watch('expand')` handler instead of inside a setter — no
+getter/setter pair at all. Applied to both `Panel.vue`'s `expand` and
+`KapatLiveChart.vue`'s three view-settings (`smoothEnabled`/
+`avgWindowMs`/`bufferSeconds`), which had the exact same shape and would
+have hit the identical bug. **"Analysis looks incomplete" turned out to
+be the same single bug, not two** — once `Panel.vue`'s collapse toggle
+actually worked, the Analysis section's full contents were already
+correct; side-by-side comparison against the live Mainsail-fork tab on
+the same real capture data confirmed byte-identical segment-browser
+output. (The still-empty `BdComposite`/`MetricGrid`/`ResultsPanel` panels
+underneath are unrelated and expected — those read live `kapatStatus.last`
+data that simply wasn't populated in Klipper's in-memory state at the
+time, identically true in the Mainsail-fork tab checked side-by-side.)
+
+A separate small cosmetic bug in the same family: `Panel.vue`'s toolbar
+icon buttons (e.g. `KapatLiveChart`'s gear icon) size themselves via
+`width: var(--panel-toolbar-icon-btn-width)`, a CSS custom property
+Mainsail's own `App.vue` sets at the `<v-app>` root — never having been
+defined here, the rule was invalid and fell back to Vuetify's default
+icon-button size, visibly crowding the button into the card's rounded
+corner. Fixed by setting the same variable (`48px`, matching
+`panelToolbarHeight`) on this app's own `<v-app :style="cssVars">`.
+
+### Deployment path: `/kapat-vue/` → `/kapat/` (replacing the Svelte SPA)
+
+Initially deployed to `~/kapat-vue-web/`, nginx `location /kapat-vue/`
+(and `= /kapat-vue`, same `default_type text/html` exact-match pattern
+as everywhere else in this project). Once verified working end-to-end
+(real live-chart data, real history, language switch, panel collapse —
+all confirmed via the Chrome DevTools MCP tools against the actual
+deployed URL, not just `vite preview`), the user asked to **replace the
+old Svelte SPA outright**: renamed to `/kapat/` (rebuilt with
+`base: '/kapat/'`, redeployed to `~/kapat-web/`, old `~/kapat-web/`
+Svelte build deleted, both `/kapat-vue` nginx blocks removed and
+replaced with `/kapat` ones pointing at the new directory). **The
+standalone Svelte SPA no longer exists anywhere on this machine or in
+the GitHub repo** — every "Two UIs on this one printer" / Svelte-SPA
+section elsewhere in this file describes a UI that has since been
+deleted; kept only for historical narrative.
+
+### GitHub publishing (three repos, `vzagranichnyy` account)
+
+Set up this session, SSH-key auth (generated fresh on this machine, no
+`gh` CLI available, no sudo for installing one):
+
+1. **[github.com/vzagranichnyy/KAPAT](https://github.com/vzagranichnyy/KAPAT)**
+   (public) — this repo. Published, then later **fully restructured**:
+   the old `web/` (Svelte source) directory was deleted outright and
+   replaced with two **pre-built** dist folders committed directly as
+   files (not source, not a separate branch):
+   - `web-dist/` — kapat-vue's build output (~1.7MB), deployed to
+     `~/kapat-web/`, served at `/kapat/`.
+   - `mainsail-dist/` — the Mainsail+KAPAT fork's build output (~11MB),
+     deployed to `~/mainsail/` (i.e. it *replaces* a stock Mainsail
+     install at the same path, not an add-on).
+   - `install.sh` rewritten around this: no more Node.js/npm needed on
+     the target machine at all (both webs ship pre-built). New
+     `--web=kapat|mainsail|both` flag (default `kapat`) picks what gets
+     deployed.
+   - `lib-web.sh` (new) — shared deploy/backup/restore helpers, sourced
+     by all three scripts below so they can't drift apart on how a
+     deployment is laid out on disk.
+   - `switch-web.sh` (new) — change the active web UI after the fact,
+     per explicit request ("при смене на веб возвращается стоковый
+     маинсейл" — switching back to `kapat` mode restores the user's
+     *original* stock Mainsail from a one-time backup
+     (`~/mainsail.stock-backup`, taken automatically the first time
+     `--web=mainsail` ever runs, never overwritten after that).
+   - `uninstall.sh` (new) — removes the Klipper extra symlink, the web
+     deployment(s), and the nginx `/kapat` block; restores the stock-
+     Mainsail backup if one exists. Deliberately does NOT touch
+     `printer.cfg`'s `[kapat]` section or `printer_data/kapat/` (saved
+     calibration data) — prints what's left to clean up by hand instead
+     of auto-deleting either.
+   - README rewritten with an install/switch/uninstall quick-reference
+     and 5 real screenshots (`docs/screenshots/`, from actual hardware
+     runs, provided by the user as local files after the initial
+     publish since pasted-into-chat images aren't reachable as files on
+     disk from this session — my own browser-tool screenshots weren't
+     reachable either, same limitation, worth remembering next time
+     this comes up).
+2. **[github.com/vzagranichnyy/Mainsail-Kapat](https://github.com/vzagranichnyy/Mainsail-Kapat)**
+   (public) — the `mainsail-src` fork. `main` branch = source (squashed
+   to one commit; the local clone here is shallow, which corrupted a
+   normal history-preserving push — squashing sidestepped that rather
+   than un-shallowing). `release` branch = pre-built `dist/` output at
+   the branch root (like a `gh-pages` branch), which is exactly what
+   got copied into `KAPAT`'s `mainsail-dist/` above. Upstream CI
+   workflows and community-governance files (issue templates, CoC,
+   FUNDING, dependabot, etc.) were stripped from `main` — built for
+   `mainsail-crew`'s own infra, meaningless (or red-X-failing) on a
+   personal single-maintainer fork.
+3. **[github.com/vzagranichnyy/KAPAT_code](https://github.com/vzagranichnyy/KAPAT_code)**
+   (private) — a full raw filesystem backup, explicitly including
+   `node_modules` and everything else the two public repos deliberately
+   exclude (`.claude/`, build artifacts, etc.), as insurance beyond the
+   curated public repos. Pushed as a single squashed commit (same
+   shallow-clone-corruption workaround as above applied to
+   `mainsail-src`'s copy inside it). **Not automatically kept in sync**
+   — re-push on explicit request only, don't assume it reflects
+   anything more recent than whenever it was last asked for.
+
+### Three real bugs found installing on a genuine third device (`mainsailos`)
+
+All found and fixed *during this session*, via the user running
+`install.sh` on a real MainsailOS box and pasting back the transcript —
+this session has no direct access to that machine.
+
+1. **The `[y/N]` confirmation prompt silently rejected a typed "y"** —
+   `Continue? [y/N] y` immediately followed by `Aborted, nothing
+   changed.`, with no error. **This is a recurrence of a bug already
+   seen once before** (on `biqu@bigtreetech-cb2`, documented further
+   down this file as "worked around with `--yes` rather than
+   root-caused") — happening again on a *third, unrelated* device
+   strongly suggested something systemic about `read -r -p "..." reply`
+   + `case "$reply" in [Yy]*)` rather than a one-off fluke, but the
+   exact mechanism is still not confirmed (no direct access to test on
+   either box). Fixed defensively rather than re-punting to `--yes`
+   again: read raw input, strip any `\r` (serial/web-console terminals
+   can send one), trim whitespace, lowercase, then match an *exact*
+   `y`/`yes` string instead of a glob — and print the normalized value
+   back in the abort message, so a third recurrence is actually
+   diagnosable instead of another mystery. Confirmed fixed live on
+   `mainsailos` (prompt accepted `y` correctly after the fix).
+2. **`sed`'s `a\` multi-line-continuation nginx-block insertion broke
+   for real**: `sed: -e expression #1, char 36: extra characters after
+   command`. Worse, **the script didn't check for this and printed
+   "added /kapat location ... and reloaded nginx" anyway** — the block
+   was never actually inserted, `nginx -t` still passed because the
+   file was simply unchanged, and the script had no way to tell the
+   difference. Fixed by writing the block to a temp file and inserting
+   it with sed's `r` (read-file) command instead (no per-line escaping
+   to get wrong — the same technique already used successfully
+   elsewhere in this project's own manual nginx edits), plus an
+   explicit `grep` check that the marker actually landed before
+   declaring success.
+3. **nginx site-config auto-detection picked the wrong file** —
+   `find_nginx_site_conf()` did `grep -rl "listen" sites-available/*`
+   and matched Debian's stock, *never-enabled* `sites-available/default`
+   before ever considering the box's real, actually-enabled
+   `sites-available/mainsail` (confirmed via `sites-enabled/` only
+   symlinking `mainsail`, and `nginx -T`'s actual active config showing
+   `mainsail`, not `default`). **This is a second, separate recurrence**
+   of a bug this file *already* documents as fixed once before (see the
+   "Gotchas" section far below) — it regressed because `lib-web.sh` was
+   written fresh this session without carrying that lesson forward into
+   the new helper function. Symptom in the browser: the `/kapat/` URL
+   returned HTTP 200, but rendered nothing recognizable — `curl`
+   revealed the served HTML referenced `echarts`/`overlayscrollbars`/
+   `vuetify` *chunk* filenames, i.e. it was actually falling through to
+   serve the box's real Mainsail root, not `~/kapat-web/` at all, because
+   the edited (dead) config was never in nginx's actual load path. Fixed
+   by making `find_nginx_site_conf()` walk `sites-enabled/` first
+   (resolving symlinks to their real target) and only falling back to a
+   blind `sites-available/` scan if that comes up empty. Confirmed fixed
+   live: re-running `install.sh` after the fix correctly added the block
+   to `sites-available/mainsail`, and the page rendered correctly
+   (confirmed via the same curl/grep asset check that caught the bug in
+   the first place).
+
+**Net result**: `mainsailos` now has a fully working, verified install
+of the `kapat` web UI (backend + `web-dist/` + working nginx block), all
+three bugs above are fixed in the published repo (not just worked
+around locally on that one box), and the user separately exercised
+`uninstall.sh` → reinstall on that same box afterward ("веб работает
+удаляю и ставлю заново для проверки" / "все отлично") — first real-world
+test of `uninstall.sh`, reported working without further issues.
 
 ## What's actually deployed right now on this CB2 (pi)
 
@@ -1044,10 +1363,15 @@ these apply to biqu's printer, which is unverified)
   AND all `kapat/*` endpoints live here — NOT proxied by nginx, browser
   must reach port 7125 directly). This applies per-printer — biqu's
   printer will need its own port 7125 reachable the same way.
-- `install.sh` auto-detected the WRONG nginx site config once
-  (`default` instead of the actually-enabled `mainsail`) — double check
-  which file is actually in `sites-enabled` on any new install before
-  trusting the installer's auto-pick.
+- `install.sh` auto-detected the WRONG nginx site config **twice now**
+  (`default` instead of the actually-enabled `mainsail`) — first here,
+  then again on `mainsailos` after `lib-web.sh` was rewritten without
+  carrying the lesson forward (see "Third interface: standalone
+  kapat-vue + GitHub publishing" above for the full second incident).
+  `find_nginx_site_conf()` in `lib-web.sh` now walks `sites-enabled/`
+  first, only falling back to a blind `sites-available/` scan if that's
+  empty — but if this file ever gets rewritten again from scratch,
+  double-check that logic survives; it's regressed once already.
 - `.chart-wrap`'s CSS height must match `LiveChart.svelte`'s
   `CHART_HEIGHT` JS constant exactly (224px both places) — a mismatch
   leaves invisible canvas overlapping whatever sits below it, silently

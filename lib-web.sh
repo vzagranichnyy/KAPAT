@@ -18,6 +18,20 @@ NGINX_MARKER_BEGIN="# >>> kapat >>>"
 NGINX_MARKER_END="# <<< kapat <<<"
 
 find_nginx_site_conf() {
+  # Prefer sites-enabled (what's actually served) over sites-available
+  # (which can contain never-enabled stock configs, e.g. Debian's
+  # default). Confirmed hitting exactly this on a real MainsailOS box:
+  # sites-available/default matched "listen" and got picked/edited, but
+  # sites-enabled only symlinks sites-available/mainsail -- the edit went
+  # into a file nginx never actually reads.
+  local f target
+  for f in /etc/nginx/sites-enabled/*; do
+    [ -e "$f" ] || continue
+    target="$(readlink -f "$f" 2>/dev/null || echo "$f")"
+    grep -q "listen" "$target" 2>/dev/null && { echo "$target"; return 0; }
+  done
+  # Fall back to sites-available only if nothing in sites-enabled matched
+  # (e.g. a setup that doesn't use the sites-enabled convention at all).
   grep -rl "listen" /etc/nginx/sites-available/ 2>/dev/null | head -n1
 }
 

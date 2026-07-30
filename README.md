@@ -36,9 +36,16 @@ Both talk to the exact same Klipper backend (this repo's `klipper_extras/`)
 and the same on-disk profiles/history/captures — switching between them
 doesn't lose any data.
 
-<!-- screenshots: KAPAT web (Live Force / Calibration / History / Analysis
-     segment browser) and Mainsail+KAPAT (sidebar tab, per-metric K_opt
-     table) go here -->
+**KAPAT web** (`/kapat/`):
+
+<img src="docs/screenshots/kapat-web-main.png" width="600" alt="KAPAT web: Live Force chart, Pressure Advance Calibration form, Filament Profile, History">
+<img src="docs/screenshots/kapat-web-analysis.png" width="600" alt="KAPAT web: Analysis segment browser with per-region stat cards and composite cost sliders">
+
+**Mainsail + KAPAT** (sidebar tab):
+
+<img src="docs/screenshots/mainsail-kapat-main.png" width="600" alt="Mainsail sidebar with the KAPAT tab open, Live Force chart and calibration form">
+<img src="docs/screenshots/mainsail-kapat-analysis.png" width="600" alt="Mainsail KAPAT tab: Analysis segment browser">
+<img src="docs/screenshots/mainsail-kapat-metrics.png" width="600" alt="Mainsail KAPAT tab: per-metric K_opt table and trend grid">
 
 ## Install
 

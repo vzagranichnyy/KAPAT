@@ -39,7 +39,8 @@ doesn't lose any data.
 **KAPAT web** (`/kapat/`):
 
 <img src="docs/screenshots/kapat-web-main.png" width="600" alt="KAPAT web: Load chart, Pressure Advance Calibration form, Filament Profile, History">
-<img src="docs/screenshots/kapat-web-analysis.png" width="600" alt="KAPAT web: Analysis segment browser with per-region stat cards and composite cost sliders">
+
+The Analysis tab looks the same as in the Mainsail fork below.
 
 **Mainsail + KAPAT** (sidebar tab, plus optional dashboard panels):
 

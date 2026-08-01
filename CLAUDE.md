@@ -354,6 +354,197 @@ around locally on that one box), and the user separately exercised
 удаляю и ставлю заново для проверки" / "все отлично") — first real-world
 test of `uninstall.sh`, reported working without further issues.
 
+## Direct SSH access to biqu's printer + a round of real bug fixes (2026-08-01)
+
+### Direct SSH access established for the first time
+
+Every previous mention of `biqu@bigtreetech-cb2` in this file assumed no
+direct access — the user had to relay copy-pasted terminal output
+manually. That changed this session: the user gave a new IP for that
+same physical printer (`192.168.2.171` — confirmed the same box via
+`hostname` = `bigtreetech-cb2`, matching this file's existing docs), and
+after adding this session's existing SSH public key (the one already
+used for GitHub, see the "kapat-vue + GitHub publishing" section above)
+to `~/.ssh/authorized_keys` there, `ssh biqu@192.168.2.171` works
+directly. **This is a real, durable capability now** — don't assume
+"no access to biqu's box" applies going forward; check first.
+
+Browser automation (Chrome DevTools MCP tools) to that same IP,
+however, stayed **blocked** the whole session — `navigate` returned
+"Navigation to this domain is not allowed" and, once the user manually
+opened the page themselves, `screenshot`/`read_page` on that tab
+returned "Permission denied for this action on this domain", even with
+the Chrome extension's own site-access permission already set to "on
+all sites" (confirmed via screenshot of the extension's popup menu).
+This looks like a fixed allowlist enforced by the browser tool itself
+(separate from Chrome's own permission model) that only covers
+whatever host this environment was originally configured against
+(`192.168.2.108`, this session's own dev box) — not something fixable
+from inside a chat session. **Don't keep retrying browser access to a
+new LAN host expecting it to eventually work** — if navigate fails
+once with that exact message, it's not transient. SSH + reading/writing
+files directly, plus asking the user to eyeball the real browser and
+report back, is the reliable fallback and worked fine for everything
+below.
+
+### PA calibration K_opt variance — diagnosed, no bug
+
+User noticed real-world K_opt spread across repeated sweeps on the same
+filament (QIDI PPA @320°C on biqu's printer): values like 0.0209-0.0246
+across a handful of runs, ~15% relative spread. Investigated by reading
+the actual capture JSON files over SSH (`printer_data/kapat/captures/
+QIDI_PPA_320C_*.json`): zero excluded segments in every run (112/112
+included each time, so not the quality gate), near-identical
+`baseline_noise_std` across runs (~4450-4480, so no single run was
+mechanically noisier), but real point-to-point jitter in per-K median
+metrics (e.g. `undershoot` at K=0.045 varying 12737/14583/17036 across
+three runs) consistent with ordinary measurement noise given only 8
+cycles averaged per K. **Conclusion: expected noise, not a bug** — user
+explicitly confirmed no code change wanted (increasing `cycles` would
+reduce it, noted as a future option, not applied).
+
+### Real bugs found and fixed in the Mainsail-fork KAPAT tab (all in `mainsail-src`, still uncommitted)
+
+Found via the user actually running tests on biqu's printer with a
+profile selected and navigating away/back mid-sweep — the exact
+scenario this file already documented fixing once (`kapatSweepState.ts`,
+see "Two UIs on this one printer" below), but it turned out that fix
+was incomplete. Three separate, related bugs, fixed in order as each
+was uncovered by testing the previous fix:
+
+1. **Selecting a profile, then just navigating away and back (no sweep
+   running at all) reset it to "New profile".** The existing
+   `kapatSweepState` singleton only covers "a sweep is currently in
+   flight" — plain idle navigation destroys/recreates `Kapat.vue` (and
+   everything under it) via Vue Router the exact same way, with nothing
+   to restore from for the non-sweeping case. Fixed in
+   `KapatProfilePicker.vue` with a **separate, always-on** mechanism:
+   the selected profile's id is persisted to `localStorage` on every
+   change and restored on `load()` (falling back to
+   `kapatSweepState.profileId` first if an actual sweep is in flight,
+   `localStorage`'s last-selected id otherwise) — survives idle
+   navigation AND full page reloads.
+   - **First attempt at this had a real race-condition bug**: the
+     `@Watch('selectedId', { immediate: true })` used to both emit
+     `update:profileId` upward AND write to `localStorage` fired
+     *immediately* on component creation with `selectedId`'s freshly-
+     initialized default (`''`) — synchronously overwriting the
+     `localStorage` value **before** `load()`'s own `await
+     loadList(...)` even got a chance to run and read it back. Fixed by
+     splitting into two watchers: the upward-emit one keeps `immediate:
+     true` (harmless, needs to fire once for a *restored* selection
+     too), the `localStorage`-writing one deliberately does not (only
+     fires on genuine subsequent changes).
+2. **PA wasn't written back into the selected profile after a sweep
+   completed** — by design, actually: the history table's "applied"
+   checkmark only means `KAPAT_APPLY` was sent to the *printer* live;
+   nothing previously touched the *saved profile's* own `pa` field
+   (this project once had a manual "use last sweep result" button for
+   exactly this, removed earlier per explicit request — see "Two UIs on
+   this one printer" below). Added an automatic version instead:
+   `KapatProfilePicker.vue` now snapshots `kapatSweepState.profileId`
+   itself (see next bug) and, on the `sweeping` true→false edge, looks
+   up that profile and overwrites its `pa` with the just-completed
+   result (rounded to 3 decimals per explicit request), persists, and
+   updates the on-screen PA field if that profile is still selected.
+   Confirmed working live on real hardware (profile's PA field updated
+   with no user action, from `0.0215654...` sweep result rounded to
+   `0.022`... — wait, confirmed the *un-rounded* write worked first,
+   rounding added right after, see below).
+3. **History still logged `filament: null` / no `filamentType`/`brand`/
+   `color`, even after fix #2 was confirmed working on the very same
+   sweep** (the profile's PA field DID update correctly on that run,
+   proving `kapatSweepState.profileId` was captured correctly — but
+   `kapatSweepState.label/filamentType/brand/color`, assigned in the
+   exact same function seconds apart, were empty in the saved history
+   entry; `params` was *also* null, and that field is separately
+   snapshotted by `Kapat.vue`'s own `handleStart()`, unrelated to this
+   refactor). **Root cause not fully nailed down** despite direct
+   inspection of `history.json` over SSH ruling out a display-only bug
+   (the raw on-disk JSON genuinely had `null`/missing fields, confirmed
+   before assuming it was just a rendering issue) and confirming the
+   currently-deployed bundle was definitely fresh enough to include the
+   relevant code (deploy timestamp on biqu's box vs. the history
+   entry's own timestamp, checked directly). Given the mystery,
+   deliberately fixed **defensively rather than by further guessing**:
+   `Kapat.vue`'s `handleStart()` now *also* snapshots
+   `label/filamentType/brand/color/profileId` from its own mirrored
+   copies (the original mechanism, restored) at click-time, and
+   `KapatProfilePicker.vue`'s own `snapshotForSweep()` (fires on the
+   `sweeping` false→true edge, reading from its own authoritative
+   local fields) only **overwrites fields that are non-empty**, so
+   neither source can stomp good data from the other with blanks.
+   Whichever of the two actually turns out to be reliable in practice
+   still gets the data into `kapatSweepState`. **Still owed**: an
+   actual fresh end-to-end test with this belt-and-suspenders version
+   deployed, to confirm history correctly shows type/brand/color this
+   time — not yet re-verified as of this writing.
+
+### New feature: cancel a running sweep
+
+User asked mid-testing whether a running calibration could be aborted.
+Investigated and confirmed a plain second gcode command (`KAPAT_CANCEL`
+sent while `KAPAT_SWEEP` is still executing) would NOT work — Klipper's
+gcode queue is sequential, so a new command sent while a previous
+command's handler is still on the stack just queues up and only runs
+once the current one returns, which is too late to matter. Implemented
+instead as a **webhook** (same mechanism as `kapat/get_data` etc.,
+already proven to work concurrently with a running sweep, since that's
+exactly how live-chart polling already works during one):
+
+- `klipper_extras/kapat/__init__.py`: new `self._cancel_requested` flag
+  (reset to `False` at the top of `cmd_KAPAT_SWEEP`, before the loop),
+  new `kapat/cancel_sweep` webhook endpoint that just sets it, and a
+  check for it at the top of both the outer K-value loop and the inner
+  per-cycle loop (so worst-case response time is about one cycle,
+  ~1.25s with default timing, not a full K value's worth of cycles).
+  On trip, raises `gcmd.error(...)` from inside the loop, which
+  unwinds through the *existing* `finally` block (PA/accel restore,
+  busy-flag clear) — no new cleanup path needed.
+- Frontend (`mainsail-src` only so far, **not yet ported to the
+  standalone `kapat-vue` app** — explicitly deferred, see "Not done"):
+  `kapatBridge.ts` gained `cancelSweep()`; `KapatSweepForm.vue` gained a
+  `sweeping` prop and a bridge prop, and shows a red "Прервать"/"Cancel"
+  button in place of the (disabled) Start button while a sweep is
+  actually running; clicking it sets a new `kapatSweepState.cancelled`
+  flag *and* calls the webhook.
+- **Why the `cancelled` flag exists**: cancelling still makes
+  `sweeping` go false the same way a normal completion does (the
+  `finally` block always clears the busy state), but
+  `kapatStatus.last` was never updated for *this* run — it still holds
+  whatever the previous successful sweep left there. Without the flag,
+  `Kapat.vue`'s completion handler would see that stale-but-non-null
+  `k_opt` and incorrectly re-log the previous sweep's result to history
+  a second time. `onSweepingChange` now checks
+  `!kapatSweepState.cancelled` before calling `logHistory()`, and
+  clears the flag right after either way.
+- Deployed directly to biqu's printer over the newly-established SSH
+  access (frontend via `rsync` of `dist/`, backend by `rsync`-ing the
+  single edited `__init__.py` straight into `~/biqu/KAPAT/klipper_extras/
+  kapat/__init__.py`, since that box's own KAPAT clone is a separate
+  checkout from this one — editing the file here does nothing there
+  without an explicit copy). **Klipper restart on biqu's box is
+  required and was NOT done by this session** (no sudo password
+  available there either, same as this local machine) — asked the user
+  to run `sudo systemctl restart klipper` themselves; not yet confirmed
+  working post-restart as of this writing.
+
+### Not committed/published anywhere yet
+
+Everything in this section exists only as: (a) uncommitted working-tree
+changes in this local `/home/pi/mainsail-src` clone, and (b) manually
+`rsync`'d files on biqu's printer (both the built frontend and the
+*single* edited backend `.py` file, not a git-tracked copy there
+either). **None of this has been committed to `mainsail-src`'s git repo,
+pushed to the `Mainsail-Kapat` GitHub repo, or synced into this repo's
+own `klipper_extras/kapat/__init__.py`** (the copy actually tracked by
+`KAPAT`'s own git history and published on GitHub) — that copy was
+edited locally on this pi machine to design/test the cancel-sweep
+webhook, but the *change itself* isn't committed/pushed there either.
+Don't assume any of this work is "done" in the sense of being
+reproducible via a fresh `git clone` + `install.sh` on a new machine —
+it currently only exists on this pi's disk and on biqu's printer's disk.
+
 ## What's actually deployed right now on this CB2 (pi)
 
 - Klipper extra: symlinked at `~/klipper/klippy/extras/kapat` →
@@ -565,7 +756,36 @@ by hand (see "Second install" section below, this is exactly the state
 
 ## Second install: biqu@bigtreetech-cb2
 
-Set up this session from a tarball of this repo (`/home/pi/kapat-
+**Status as of 2026-08-01: fully up and running, real hardware data,
+direct SSH access.** Everything below the next paragraph describes the
+very early bring-up state (tarball install, nothing verified) and is
+kept only as history — see "Direct SSH access to biqu's printer + a
+round of real bug fixes (2026-08-01)" above for the current, actively-
+maintained state of this machine.
+
+**Current facts** (superseding everything below): reachable via
+`ssh biqu@192.168.2.171` (this specific IP, not necessarily the
+`bigtreetech-cb2` mDNS name — confirmed via `hostname` output, not
+assumed). Runs the **Mainsail+KAPAT fork** (`mainsail-src`'s build),
+NOT the standalone `kapat-vue` app — `nginx`'s `sites-enabled/mainsail`
+has `root /home/biqu/mainsail`, and `/home/biqu/kapat-web` (which an
+old, stale `/kapat` nginx block still references) doesn't even exist on
+disk. The KAPAT Klipper extra is symlinked from
+`/home/biqu/KAPAT/klipper_extras/kapat` (that user's **own separate
+git clone** of this repo — editing `klipper_extras/*.py` on this `pi`
+machine does NOT affect biqu's printer; changes must be explicitly
+copied over, e.g. `rsync ... biqu@192.168.2.171:/home/biqu/KAPAT/
+klipper_extras/kapat/__init__.py`, same as any other remote deploy).
+Real, current filament profile in active use there: "QIDI PPA" @320°C,
+K in the 0.020-0.025 range across many real sweeps (see the K_opt
+variance investigation above) — **do not assume `pi`'s ABS/280°C
+numbers documented under "Known-good hardware facts" below apply to
+this machine**, it's a genuinely different printer/hotend/filament.
+
+<details>
+<summary>Historical: original tarball bring-up (superseded, kept for context)</summary>
+
+Set up in an earlier session from a tarball of this repo (`/home/pi/kapat-
 <timestamp>.tar.gz`, `web/node_modules`/`dist`/`.claude` excluded).
 Preflight-detected paths on that machine:
 - Klipper: `/home/biqu/klipper`
@@ -573,32 +793,16 @@ Preflight-detected paths on that machine:
 - Web deploy dir: `/home/biqu/kapat-web`
 - `install.sh --yes` completed cleanly (the interactive `[y/N]` prompt
   didn't accept a typed `y` for unknown reasons on that box's terminal
-  — worked around with `--yes` rather than root-caused; if this
-  recurs, look at `read -r -p` behavior under whatever terminal/serial
-  setup that box uses).
+  — worked around with `--yes` rather than root-caused at the time;
+  this exact class of bug recurred again later on `mainsailos` and
+  *was* root-caused then — see the kapat-vue/GitHub publishing section
+  above).
 
-Still outstanding on that machine (none of this can be verified from
-this session — status is only as good as what the user reports back):
-- **nginx `/kapat` (no-slash) fix has NOT been confirmed applied.** The
-  installer that ran there predates this session's `install.sh`
-  two-block update, so it only added `location /kapat/`. A manual `sed`
-  command was given to the user in chat to insert the missing
-  `location = /kapat { default_type text/html; alias
-  /home/biqu/kapat-web/index.html; }` block ahead of the existing one,
-  followed by `sudo nginx -t && sudo systemctl reload nginx` — confirm
-  this was actually run before assuming `/kapat` (no slash) works
-  there.
-- **`[kapat]` section still needs adding to that printer's
-  `printer.cfg`** (see `docs/printer.cfg.example` in the tarball) and
-  **Klipper restarted** there — the installer only places the Python
-  extra + web assets + nginx block, it does not touch `printer.cfg`.
-  Until both of those happen, `KAPAT_SWEEP` won't exist as a gcode
-  command on that printer yet.
-- No live-load-cell/sweep verification has happened on that printer at
-  all yet (no history, no hardware facts known about it — don't assume
-  anything about its sensor type, calibration position, or filament/K
-  numbers; those are specific to `pi`'s printer, see "Known-good
-  hardware facts" below).
+At the time, `[kapat]` hadn't been added to `printer.cfg` yet and no
+live sweep had ever been run on this machine — both long since done;
+ignore any implication otherwise elsewhere in this historical block.
+
+</details>
 
 ## Two UIs on this one printer (pi) — mainsail-src, discovered this session
 
@@ -1398,14 +1602,45 @@ these apply to biqu's printer, which is unverified)
   button that an earlier pass repositioned was **removed entirely** in
   a later pass — see "Темп/PA row simplified" under "Two UIs on this
   one printer" above. No outstanding verification needed on it.
-- (Resolved, kept only as a pointer) The `kapatSweepState.ts` fix for
-  history entries missing `params`/`filament`/`filamentType`/`brand`/
-  `color` is now **confirmed working on a real sweep** — see the
-  "Confirmed fixed" update under "Real bug found and fixed" above.
-  `history.json` was cleared by the user before that test sweep, so it
-  currently has just the 1 fresh, fully-populated entry — don't be
-  alarmed that the older entries documented earlier in this file are
-  gone, that was intentional test hygiene, not data loss.
+- **UPDATE 2026-08-01: the item below turned out to be premature.** The
+  original `kapatSweepState.ts` fix for history entries missing
+  `params`/`filament`/`filamentType`/`brand`/`color` was confirmed
+  working on `pi`'s printer at the time, but the exact same symptom
+  **recurred on biqu's printer** this session despite that fix being in
+  place, root cause still not fully understood. See "Direct SSH access
+  to biqu's printer + a round of real bug fixes (2026-08-01)" above for
+  the investigation and the defensive (belt-and-suspenders,
+  non-destructive dual-snapshot) fix applied — **still needs a fresh
+  end-to-end re-test to confirm it actually holds this time**, not yet
+  done as of this writing.
+- (Historical, superseded by the update above) The `kapatSweepState.ts`
+  fix for history entries missing `params`/`filament`/`filamentType`/
+  `brand`/`color` was confirmed working on a real sweep on `pi`'s
+  printer — see the "Confirmed fixed" update under "Real bug found and
+  fixed" above. `history.json` was cleared by the user before that test
+  sweep, so it had just the 1 fresh, fully-populated entry at the time
+  — that was intentional test hygiene, not data loss.
+- **Port the new "cancel sweep" feature to the standalone `kapat-vue`
+  app.** Currently only implemented in `mainsail-src` (webhook +
+  frontend button) — deliberately deferred per explicit user agreement
+  this session, not forgotten. `kapat-vue`'s `Kapat.vue`/
+  `KapatSweepForm.vue`/`kapatBridge.ts`/`kapatSweepState.ts` are
+  otherwise near-identical copies (see the "Third interface" section
+  above), so this should mostly be porting the same diffs across.
+- **Commit and publish the cancel-sweep backend change.** The Python
+  side (`klipper_extras/kapat/__init__.py`'s new `cancel_sweep` webhook
+  + cancel-flag checks) is currently only a local edit on this pi
+  machine plus a manually `rsync`'d copy on biqu's printer's own KAPAT
+  clone — not committed to this repo's git history, not pushed to
+  GitHub. A fresh `git clone` of `KAPAT` right now would NOT include
+  this feature.
+- **Confirm biqu's Klipper restart actually happened and the
+  cancel-sweep webhook works end-to-end** (start a sweep, click Cancel,
+  confirm it actually stops within ~1-2s, PA/accel get restored, and no
+  spurious history entry gets logged) — asked the user to run `sudo
+  systemctl restart klipper` there but this session has no way to
+  confirm it happened or test the result directly (no browser access to
+  that host, see above).
 - **Decide whether to commit the `mainsail-src` changes.** It's a real
   git repo (unlike `/home/pi/KAPAT`) but nobody has asked for a commit
   yet — `NumberInput.vue`, `KapatProfilePicker.vue`,

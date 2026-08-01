@@ -87,6 +87,7 @@ class Kapat:
         self._load_cell = None
         self._last = {}
         self._activity = {'state': 'idle'}
+        self._cancel_requested = False
 
         # printer_data/kapat/ next to printer_data/config/printer.cfg --
         # derived from the running config file's path rather than
@@ -119,6 +120,8 @@ class Kapat:
                                     self._handle_get_capture)
         webhooks.register_endpoint('kapat/delete_all_captures',
                                     self._handle_delete_all_captures)
+        webhooks.register_endpoint('kapat/cancel_sweep',
+                                    self._handle_cancel_sweep)
 
     # -- load cell resolution (mirrors autopa/__init__.py) -------------------
     def _handle_ready(self):
@@ -284,6 +287,7 @@ class Kapat:
                     "G1 E%.4f F%.0f" % (e_amt, (e_amt / dur) * 60.))
 
         gc.collect()
+        self._cancel_requested = False
         self._set_busy('sweep', 0.5 + len(ks) * (tslow + cycles *
                        (tfast + tslow)) + (warmup - 1.) * tslow)
         try:
@@ -303,12 +307,16 @@ class Kapat:
                 return hi_pos if wob[0] else lo_pos
 
             for ki, kv in enumerate(ks):
+                if self._cancel_requested:
+                    raise gcmd.error("kapat: sweep cancelled by user")
                 self._set_pa(kv)
                 t_k0 = toolhead.get_last_move_time()
                 rising, falling = [], []
                 lead = tslow * (warmup if ki == 0 else 1.0)
                 _leg(slow * lead, lead, _next_target())
                 for c in range(cycles):
+                    if self._cancel_requested:
+                        raise gcmd.error("kapat: sweep cancelled by user")
                     toolhead.register_lookahead_callback(
                         lambda pt, a=rising: a.append(pt))
                     _leg(fast * tfast, tfast, _next_target())
@@ -566,6 +574,19 @@ class Kapat:
         except (IOError, OSError, ValueError):
             value = []
         web_request.send({'value': value})
+
+    # Reached over the same webhook bridge as get_data/list_captures --
+    # NOT a gcode command. KAPAT_SWEEP occupies the gcode queue for its
+    # entire duration (minutes), so a *new* gcode command sent while it's
+    # still running would just queue up and only execute after the sweep
+    # finishes -- useless for cancellation. Webhook endpoints, in
+    # contrast, run independently of the gcode queue (the same mechanism
+    # already lets the live force chart poll status *while* a sweep is
+    # running), so this can actually take effect immediately: it just
+    # flips a flag that cmd_KAPAT_SWEEP's own loop checks every cycle.
+    def _handle_cancel_sweep(self, web_request):
+        self._cancel_requested = True
+        web_request.send({'ok': True})
 
     def _handle_set_data(self, web_request):
         key = web_request.get_str('key')

@@ -38,14 +38,22 @@ doesn't lose any data.
 
 **KAPAT web** (`/kapat/`):
 
-<img src="docs/screenshots/kapat-web-main.png" width="600" alt="KAPAT web: Live Force chart, Pressure Advance Calibration form, Filament Profile, History">
+<img src="docs/screenshots/kapat-web-main.png" width="600" alt="KAPAT web: Load chart, Pressure Advance Calibration form, Filament Profile, History">
 <img src="docs/screenshots/kapat-web-analysis.png" width="600" alt="KAPAT web: Analysis segment browser with per-region stat cards and composite cost sliders">
 
-**Mainsail + KAPAT** (sidebar tab):
+**Mainsail + KAPAT** (sidebar tab, plus optional dashboard panels):
 
-<img src="docs/screenshots/mainsail-kapat-main.png" width="600" alt="Mainsail sidebar with the KAPAT tab open, Live Force chart and calibration form">
+<img src="docs/screenshots/mainsail-kapat-main.png" width="600" alt="Mainsail sidebar with the KAPAT tab open, Load chart and calibration form">
 <img src="docs/screenshots/mainsail-kapat-analysis.png" width="600" alt="Mainsail KAPAT tab: Analysis segment browser">
 <img src="docs/screenshots/mainsail-kapat-metrics.png" width="600" alt="Mainsail KAPAT tab: per-metric K_opt table and trend grid">
+
+The Load chart, Pressure Advance Calibration, and Filament Profile cards
+are also available as individual panels on Mainsail's main Dashboard
+tab (alongside Temperature/Extruder/Console), toggleable per-panel from
+Interface Settings → Dashboard:
+
+<img src="docs/screenshots/mainsail-kapat-dashboard.png" width="600" alt="Mainsail main Dashboard with the Load, Pressure Advance Calibration, and Filament Profile panels alongside Toolhead, Temperatures, and Miscellaneous">
+<img src="docs/screenshots/mainsail-kapat-settings.png" width="600" alt="Mainsail Interface Settings dialog showing Load, Pressure Advance, and Filament Profile as toggleable dashboard panels">
 
 ## Install
 

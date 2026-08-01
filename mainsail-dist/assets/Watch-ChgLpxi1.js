@@ -1,1 +1,0 @@
-import{F as e}from"./_plugin-vue2_normalizer-BzgDz6J-.js";function t(t,n){n===void 0&&(n={});var r=n.deep,i=r!==void 0&&r,a=n.immediate,o=a!==void 0&&a;return e(function(e,n){typeof e.watch!=`object`&&(e.watch=Object.create(null));var r=e.watch;typeof r[t]==`object`&&!Array.isArray(r[t])?r[t]=[r[t]]:r[t]===void 0&&(r[t]=[]),r[t].push({handler:n,deep:i,immediate:o})})}export{t};

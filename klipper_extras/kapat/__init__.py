@@ -174,6 +174,59 @@ class Kapat:
                              "heat the hotend first" %
                              (status.get('temperature', 0.),))
 
+    # settings.json is the same plain {calibX, calibY, calibZ} object
+    # the web UIs read/write via kapat/get_data + kapat/set_data (see
+    # _handle_get_data below) -- read directly here rather than
+    # threading X/Y/Z through as gcode params, since this file is
+    # already the single source of truth for that value everywhere else.
+    def _read_calib_position(self):
+        path = self._data_path('settings')
+        try:
+            with open(path) as f:
+                settings = json.load(f)
+        except (IOError, OSError, ValueError):
+            settings = {}
+        return (settings.get('calibX', 0.), settings.get('calibY', 0.),
+                settings.get('calibZ', 10.))
+
+    # Home (if needed), move to the configured calibration position, and
+    # heat to TARGET_TEMP (if needed) -- all server-side, entirely
+    # inside this one gcode command, so a browser tab closing partway
+    # through can no longer strand the printer mid-sequence (homed and/
+    # or heated, but the actual sweep never issued). This used to be
+    # orchestrated by the web UI's own JavaScript instead, awaiting each
+    # step's RPC response before sending the next one -- exactly the
+    # kind of multi-step sequence Mainsail itself always implements as
+    # one server-side macro (PRINT_START and friends), never as a chain
+    # of browser-issued commands. Confirmed live: closing the tab right
+    # after confirming the heat-up dialog left the nozzle heated with
+    # no calibration ever starting, since the JavaScript that would
+    # have sent KAPAT_SWEEP next no longer existed anywhere.
+    #
+    # The confirmation prompts themselves ("home now?" / "heat now?")
+    # still live in the web UI, shown *before* this ever gets called --
+    # this only performs the already-confirmed actions, it doesn't ask
+    # the user anything itself.
+    def _prepare_for_sweep(self, gcmd, target_temp):
+        toolhead = self.printer.lookup_object('toolhead')
+        homed = toolhead.get_status(self.reactor.monotonic()).get(
+            'homed_axes', '')
+        if not all(a in homed for a in 'xyz'):
+            self._set_busy('homing', 30.)
+            self.gcode.run_script_from_command("G28")
+        calib_x, calib_y, calib_z = self._read_calib_position()
+        self._set_busy('moving', 5.)
+        self.gcode.run_script_from_command(
+            "G1 X%.3f Y%.3f Z%.3f F3000" % (calib_x, calib_y, calib_z))
+        if target_temp is not None:
+            extruder = toolhead.get_extruder()
+            cur_temp = extruder.get_status(
+                self.reactor.monotonic()).get('temperature', 0.)
+            if cur_temp < target_temp - 5.:
+                self._set_busy('heating', 120.)
+                self.gcode.run_script_from_command(
+                    "M109 S%.1f" % target_temp)
+
     def _set_busy(self, state, eta_s):
         self._activity = {'state': state, 'eta_s': float(eta_s),
                           'started': self.reactor.monotonic()}
@@ -197,6 +250,16 @@ class Kapat:
 
         lc = self._get_load_cell(gcmd)
         toolhead = self.printer.lookup_object('toolhead')
+
+        # TARGET_TEMP is optional and new -- only the web UIs pass it
+        # (see kapatController.ts's handleStart()). Plain console/macro
+        # use without it keeps the old behavior exactly: no auto-home/
+        # move/heat, just the _check_extrude_temp() hard-fail below if
+        # the hotend isn't already ready.
+        target_temp = gcmd.get_float('TARGET_TEMP', None,
+                                      minval=0., maxval=350.)
+        if target_temp is not None:
+            self._prepare_for_sweep(gcmd, target_temp)
         self._check_extrude_temp(gcmd)
 
         # FILAMENT is purely cosmetic (Klipper has no notion of a

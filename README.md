@@ -129,6 +129,64 @@ docs/printer.cfg.example
 tests/
 ```
 
+## G-code reference (for slicers/macros)
+
+Both web UIs are just a thin form over `KAPAT_SWEEP` / `KAPAT_APPLY` --
+either works fine typed directly into the console, dropped into a
+slicer's custom g-code, or wrapped in your own macro.
+
+### `KAPAT_SWEEP`
+
+Runs an in-air slow/fast extrusion square wave and reports a recommended
+pressure-advance K. Every parameter is optional -- anything you omit
+falls back to your `[kapat]` config section's own default (see
+`docs/printer.cfg.example`).
+
+| Param | Meaning | Default |
+|---|---|---|
+| `TARGET_TEMP` | Extruder temp to reach first. If given, `KAPAT_SWEEP` also homes (if needed) and moves to the configured calibration position before heating -- the whole thing runs as one command, no separate `G28`/`M109` needed. Omit it and the command behaves like before: it expects the hotend already up to temp and refuses otherwise. | — |
+| `VFR` / `VFR_LOW` | Fast/slow volumetric flow rate (mm³/s) | 19.24 / 1.92 |
+| `TSLOW` / `TFAST` | Duration of the slow/fast leg per cycle (s) | 1.0 / 0.25 |
+| `CYCLES` | Slow/fast cycles measured per K value | 8 |
+| `KSTART` / `KEND` / `KSTEP` | K sweep range | 0.0 / 0.08 / 0.005 |
+| `WARMUP` | Extra slow-leg multiplier before the first measured cycle | 4.0 |
+| `WOBBLE_AXIS` | `X` or `Y` -- which axis nudges to trigger Klipper's pressure-advance gate | `Y` |
+| `WOBBLE` | Wobble distance in mm; `WOBBLE=0` disables it (needs the axis already homed if left on) | 0.05 |
+| `ACCEL` | Acceleration used only while wobbling | 1000 |
+| `APPLY` | `1` applies the recommended K live when the sweep finishes, `0` just reports it | 1 |
+| `MAXFILAMENT` | Safety cap in mm -- refuses to start a sweep that would extrude more than this | 400 |
+| `FILAMENT` | Cosmetic label only, used to name the raw capture file on disk | — |
+| `WEIGHTS` | `name:val,name:val` overrides for individual bd_pressure metric weights that make up the composite K_opt | — |
+
+The calibration position `TARGET_TEMP` moves to comes from
+`printer_data/kapat/settings.json` (`calibX`/`calibY`/`calibZ`) -- set it
+once from either web UI's "Filament Profile" card (X/Y/Z fields at the
+bottom) before relying on it from a macro.
+
+Minimal example, no `G28`/`M109` needed:
+```gcode
+KAPAT_SWEEP TARGET_TEMP=245 FILAMENT=MyFilament
+```
+
+Same thing with an explicit K range:
+```gcode
+KAPAT_SWEEP TARGET_TEMP=245 FILAMENT=MyFilament KSTART=0.01 KEND=0.06 KSTEP=0.005 CYCLES=8
+```
+
+**Don't add this to every print's start g-code.** A sweep takes a couple
+of minutes and moves the toolhead to the calibration position first --
+fine for a dedicated "run a calibration" print (an otherwise-empty
+model, or your own macro triggered manually), but not something you want
+slowing down every normal print. For a one-off, just type it into the
+console, or use either web UI instead.
+
+### `KAPAT_APPLY`
+
+```gcode
+KAPAT_APPLY              ; applies the most recent sweep's K_opt
+KAPAT_APPLY K=0.024      ; applies a specific K
+```
+
 ## License
 
 AGPL-3.0-or-later, matching both autopa and PrusaPATuner.

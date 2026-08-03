@@ -242,7 +242,9 @@ class Kapat:
         "estimators and applies it live (APPLY=0 to skip). Args: VFR "
         "VFR_LOW TSLOW TFAST CYCLES KSTART KEND KSTEP WARMUP WOBBLE_AXIS "
         "WOBBLE ACCEL APPLY WEIGHTS=name:val,name:val (bd_pressure metric "
-        "weight overrides).")
+        "weight overrides) MODE=GRID|BISECT (BISECT bisects on the sign "
+        "of integral_area instead of scanning every K; KSTEP becomes a "
+        "stop-tolerance rather than a grid step in that mode).")
 
     def cmd_KAPAT_SWEEP(self, gcmd):
         import gc
@@ -261,6 +263,10 @@ class Kapat:
         if target_temp is not None:
             self._prepare_for_sweep(gcmd, target_temp)
         self._check_extrude_temp(gcmd)
+
+        mode = gcmd.get('MODE', 'GRID').strip().upper()
+        if mode not in ('GRID', 'BISECT'):
+            raise gcmd.error("kapat: MODE must be GRID or BISECT")
 
         # FILAMENT is purely cosmetic (Klipper has no notion of a
         # "selected filament profile" -- that's a web-UI construct) --
@@ -333,9 +339,6 @@ class Kapat:
         orig_pa = self._get_pa()
         windows = []
         transitions = []
-        collector = lc.get_collector()
-        t0 = toolhead.get_last_move_time()
-        collector.start_collecting(min_time=t0)
         wobbling = wobble > 0.
         old_accel = toolhead.get_status(
             self.reactor.monotonic()).get('max_accel') if wobbling else None
@@ -351,8 +354,107 @@ class Kapat:
 
         gc.collect()
         self._cancel_requested = False
-        self._set_busy('sweep', 0.5 + len(ks) * (tslow + cycles *
+        if mode == 'BISECT' and len(ks) >= 3:
+            # Bisection only ever visits ~log2(N)+2 of the N grid points --
+            # a much better ETA estimate than the full-grid figure below,
+            # which the frontend's busy/progress indicator polls live.
+            est_probes = int(math.ceil(math.log(len(ks), 2))) + 2
+        else:
+            est_probes = len(ks)
+        self._set_busy('sweep', 0.5 + est_probes * (tslow + cycles *
                        (tfast + tslow)) + (warmup - 1.) * tslow)
+
+        collector = lc.get_collector() if mode == 'GRID' else None
+        t0 = toolhead.get_last_move_time() if mode == 'GRID' else None
+        if collector is not None:
+            collector.start_collecting(min_time=t0)
+
+        # BISECT-only accumulators -- each probe gets its OWN scoped
+        # start_collecting/collect_until pair (confirmed safe to call
+        # repeatedly within one gcode command via a throwaway PoC command
+        # tested live on real hardware -- see
+        # /home/pi/.claude/plans/spicy-soaring-koala.md, "Step 0"), and its
+        # samples are stitched onto a running virtual timeline (1s gap
+        # between probes) so the existing pac.analyse_sweep_segments /
+        # bdp.analyse_bd / _save_capture machinery below can treat a
+        # sparse, non-uniformly-spaced set of probes exactly like a
+        # (shorter) ordinary sweep -- no separate code path needed for
+        # them downstream.
+        ks_visited = []
+        t_chunks = []
+        force_chunks = []
+        bisect_fallback = False
+        virtual_offset = 0.0
+        # collect_until() returns errors as 0 (clean) or an (errors,
+        # overflows) tuple -- NOT a plain int -- so per-probe values are
+        # accumulated as two running counts, not summed directly.
+        err_count_total = 0
+        overflow_count_total = 0
+
+        def _run_single_k(kv, is_first):
+            if self._cancel_requested:
+                raise gcmd.error("kapat: sweep cancelled by user")
+            self._set_pa(kv)
+            t_k0 = toolhead.get_last_move_time()
+            rising, falling = [], []
+            lead = tslow * (warmup if is_first else 1.0)
+            _leg(slow * lead, lead, _next_target())
+            for c in range(cycles):
+                if self._cancel_requested:
+                    raise gcmd.error("kapat: sweep cancelled by user")
+                toolhead.register_lookahead_callback(
+                    lambda pt, a=rising: a.append(pt))
+                _leg(fast * tfast, tfast, _next_target())
+                toolhead.register_lookahead_callback(
+                    lambda pt, a=falling: a.append(pt))
+                _leg(slow * tslow, tslow, _next_target())
+            t_k1 = toolhead.get_last_move_time()
+            return t_k0, t_k1, rising, falling
+
+        def _probe_k(kv, is_first):
+            # BISECT mode only: one K, its own collector session, folded
+            # into the running virtual timeline above.
+            nonlocal virtual_offset, err_count_total, overflow_count_total
+            c = lc.get_collector()
+            real_t0 = toolhead.get_last_move_time()
+            c.start_collecting(min_time=real_t0)
+            try:
+                t_k0, t_k1, rising, falling = _run_single_k(kv, is_first)
+                samples, e = c.collect_until(t_k1)
+            finally:
+                try:
+                    c.is_started = False
+                except Exception:
+                    logging.exception("kapat: bisect collector release failed")
+            if e:
+                err_count_total += e[0]
+                overflow_count_total += e[1]
+            if not len(samples):
+                return float('nan')
+            arr = np.asarray(samples, dtype=float)
+            t_local = arr[:, 0] - real_t0
+            force_local = -(arr[:, 2] - arr[:, 3])
+            rising_local = [r - real_t0 for r in rising]
+            falling_local = [f - real_t0 for f in falling]
+            t_k1_local = t_k1 - real_t0
+            probe_result = pac.analyse_sweep_segments(
+                t_local, force_local, [kv], [(0.0, t_k1_local)],
+                [(rising_local, falling_local)],
+                slow_v=vfr_low, fast_v=vfr, slow_half_s=tslow,
+                fast_half_s=tfast, cycle_period_s=period)
+            area = (probe_result.per_k[0].integral_area
+                    if probe_result.per_k else float('nan'))
+            v0 = virtual_offset
+            v1 = v0 + t_k1_local
+            t_chunks.append(t_local + v0)
+            force_chunks.append(force_local)
+            windows.append((v0, v1))
+            transitions.append(([r + v0 for r in rising_local],
+                                 [f + v0 for f in falling_local]))
+            ks_visited.append(kv)
+            virtual_offset = v1 + 1.0
+            return area
+
         try:
             toolhead.dwell(0.5)
             self.gcode.run_script_from_command("G90")
@@ -369,34 +471,56 @@ class Kapat:
                 wob[0] = not wob[0]
                 return hi_pos if wob[0] else lo_pos
 
-            for ki, kv in enumerate(ks):
-                if self._cancel_requested:
-                    raise gcmd.error("kapat: sweep cancelled by user")
-                self._set_pa(kv)
-                t_k0 = toolhead.get_last_move_time()
-                rising, falling = [], []
-                lead = tslow * (warmup if ki == 0 else 1.0)
-                _leg(slow * lead, lead, _next_target())
-                for c in range(cycles):
-                    if self._cancel_requested:
-                        raise gcmd.error("kapat: sweep cancelled by user")
-                    toolhead.register_lookahead_callback(
-                        lambda pt, a=rising: a.append(pt))
-                    _leg(fast * tfast, tfast, _next_target())
-                    toolhead.register_lookahead_callback(
-                        lambda pt, a=falling: a.append(pt))
-                    _leg(slow * tslow, tslow, _next_target())
-                t_k1 = toolhead.get_last_move_time()
-                windows.append((t_k0, t_k1))
-                transitions.append((rising, falling))
-            t_end = toolhead.get_last_move_time()
-            samples, errs = collector.collect_until(t_end)
+            if mode == 'GRID':
+                for ki, kv in enumerate(ks):
+                    t_k0, t_k1, rising, falling = _run_single_k(kv, ki == 0)
+                    windows.append((t_k0, t_k1))
+                    transitions.append((rising, falling))
+                t_end = toolhead.get_last_move_time()
+                samples, errs = collector.collect_until(t_end)
+            else:
+                if len(ks) < 3:
+                    # Too few points for bisection to be meaningful --
+                    # honestly fall back to visiting every one of them,
+                    # same as GRID would (recovers full composite fidelity
+                    # too, see the shared post-loop code below).
+                    bisect_fallback = True
+                    for i, kv in enumerate(ks):
+                        _probe_k(kv, i == 0)
+                else:
+                    lo, hi = round(kstart, 6), round(kend, 6)
+                    area_lo = _probe_k(lo, True)
+                    area_hi = _probe_k(hi, False)
+                    bisect_fallback = (
+                        not (np.isfinite(area_lo) and np.isfinite(area_hi))
+                        or np.sign(area_lo) == np.sign(area_hi))
+                    if bisect_fallback:
+                        already = {lo, hi}
+                        for kv in ks:
+                            if kv in already:
+                                continue
+                            _probe_k(kv, False)
+                    else:
+                        while (hi - lo) > kstep:
+                            mid = round((lo + hi) / 2.0, 6)
+                            if mid <= lo or mid >= hi:
+                                break
+                            area_mid = _probe_k(mid, False)
+                            if not np.isfinite(area_mid):
+                                break
+                            if np.sign(area_mid) == np.sign(area_lo):
+                                lo, area_lo = mid, area_mid
+                            else:
+                                hi, area_hi = mid, area_mid
+                errs = ((err_count_total, overflow_count_total)
+                        if (err_count_total or overflow_count_total) else 0)
         finally:
             self._clear_busy()
-            try:
-                collector.is_started = False
-            except Exception:
-                logging.exception("kapat: collector release failed")
+            if collector is not None:
+                try:
+                    collector.is_started = False
+                except Exception:
+                    logging.exception("kapat: collector release failed")
             try:
                 self._set_pa(orig_pa)
             except Exception:
@@ -408,18 +532,30 @@ class Kapat:
                 except Exception:
                     logging.exception("kapat: failed to restore accel")
 
-        if not len(samples):
-            raise gcmd.error("kapat: no samples captured (errors=%s)" % (errs,))
-
-        arr = np.asarray(samples, dtype=float)
-        t_rel = arr[:, 0] - t0
-        force = -(arr[:, 2] - arr[:, 3])
-        windows_rel = [(a - t0, b - t0) for a, b in windows]
-        transitions_rel = [([r - t0 for r in rs], [f - t0 for f in fs])
-                            for rs, fs in transitions]
+        if mode == 'GRID':
+            if not len(samples):
+                raise gcmd.error(
+                    "kapat: no samples captured (errors=%s)" % (errs,))
+            arr = np.asarray(samples, dtype=float)
+            t_rel = arr[:, 0] - t0
+            force = -(arr[:, 2] - arr[:, 3])
+            windows_rel = [(a - t0, b - t0) for a, b in windows]
+            transitions_rel = [([r - t0 for r in rs], [f - t0 for f in fs])
+                                for rs, fs in transitions]
+            ks_final = ks
+        else:
+            if not ks_visited:
+                raise gcmd.error(
+                    "kapat: bisection sweep produced no usable samples")
+            order = sorted(range(len(ks_visited)), key=lambda i: ks_visited[i])
+            ks_final = [ks_visited[i] for i in order]
+            windows_rel = [windows[i] for i in order]
+            transitions_rel = [transitions[i] for i in order]
+            t_rel = np.concatenate([t_chunks[i] for i in order])
+            force = np.concatenate([force_chunks[i] for i in order])
 
         result = pac.analyse_sweep_segments(
-            t_rel, force, ks, windows_rel, transitions_rel,
+            t_rel, force, ks_final, windows_rel, transitions_rel,
             slow_v=vfr_low, fast_v=vfr,
             slow_half_s=tslow, fast_half_s=tfast, cycle_period_s=period)
 
@@ -438,8 +574,18 @@ class Kapat:
             cycle_windows.append(cycles_list)
 
         bd_weights = self._bd_weights_override(gcmd)
-        bd_result = bdp.analyse_bd(t_rel, force, ks, cycle_windows,
+        bd_result = bdp.analyse_bd(t_rel, force, ks_final, cycle_windows,
                                     weights=bd_weights)
+
+        # True bisection (not the sign-agreement fallback) never visits
+        # enough, evenly-enough-spread K's for the composite/per-metric
+        # argmin to mean anything -- report it honestly via integral-area
+        # instead (see _report_sweep) rather than let a technically-
+        # computable-but-misleading composite become the headline number.
+        bisect_true = (mode == 'BISECT' and not bisect_fallback)
+        if bisect_true:
+            bd_result.composite_k_opt = None
+            bd_result.metric_k_opt = {}
 
         capture_id = None
         try:
@@ -449,21 +595,26 @@ class Kapat:
             # the web UI intended to request.
             extruder_temp = toolhead.get_extruder().get_status(
                 self.reactor.monotonic()).get('target', 0.)
+            capture_k_opt = (result.integral_fit.k_opt
+                              if bisect_true and result.integral_fit
+                              else bd_result.composite_k_opt)
             capture_id = self._save_capture(t_rel, force, cycle_windows,
                                              bd_result.per_k, {
                 'vfr': vfr, 'vfr_low': vfr_low, 'tslow': tslow,
-                'tfast': tfast, 'cycles': cycles, 'ks': ks, 'kstep': kstep,
-                'wobble': wobble, 'wobble_axis': wobble_axis,
-                'k_opt': bd_result.composite_k_opt,
+                'tfast': tfast, 'cycles': cycles, 'ks': ks_final,
+                'kstep': kstep, 'wobble': wobble, 'wobble_axis': wobble_axis,
+                'k_opt': capture_k_opt, 'mode': mode.lower(),
                 'filament': filament, 'temp': extruder_temp})
         except Exception:
             logging.exception("kapat: failed to save raw capture")
 
         self._report_sweep(gcmd, result, bd_result, meta={
             'vfr': vfr, 'vfr_low': vfr_low, 'tslow': tslow, 'tfast': tfast,
-            'cycles': cycles, 'ks': ks, 'kstep': kstep, 'errs': errs,
+            'cycles': cycles, 'ks': ks_final, 'kstep': kstep, 'errs': errs,
             'wobble': wobble, 'wobble_axis': wobble_axis, 'apply': apply_,
-            'orig_pa': orig_pa, 'capture_id': capture_id})
+            'orig_pa': orig_pa, 'capture_id': capture_id, 'mode': mode.lower(),
+            'bisect_fallback': bisect_fallback,
+            'total_ks': len(ks)})
 
     def _bd_weights_override(self, gcmd):
         # WEIGHTS=name1:val1,name2:val2 gcode param overrides individual
@@ -495,6 +646,13 @@ class Kapat:
         if wob <= 0.:
             lines.append("  WARNING: WOBBLE=0 -> extrude-only moves, Klipper "
                          "applied NO pressure advance; K_opt is meaningless.")
+        if meta.get('mode') == 'bisect':
+            if meta.get('bisect_fallback'):
+                lines.append("  bisection: endpoints agreed in sign (or too "
+                             "few K's) -- fell back to a full grid scan")
+            else:
+                lines.append("  bisection: visited %d of %d K values" %
+                             (len(meta['ks']), meta.get('total_ks', len(meta['ks']))))
 
         lines.append("  K         phase_lag_ms   integral_area   n_samples")
         for r in result.per_k:
@@ -515,7 +673,11 @@ class Kapat:
                          (result.integral_fit.k_opt,
                           result.integral_fit.r_squared))
             if k_opt is None:
-                k_opt, k_opt_source = result.integral_fit.k_opt, "integral-area"
+                bisect_true = (meta.get('mode') == 'bisect'
+                               and not meta.get('bisect_fallback'))
+                k_opt = result.integral_fit.k_opt
+                k_opt_source = ("integral-area (bisection)" if bisect_true
+                                 else "integral-area")
         if result.phase_fit is not None:
             lines.append("  phase-lag K_opt     = %.4f (R^2=%.3f)" %
                          (result.phase_fit.k_opt, result.phase_fit.r_squared))

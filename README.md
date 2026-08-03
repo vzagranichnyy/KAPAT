@@ -56,6 +56,37 @@ Interface Settings → Dashboard:
 <img src="docs/screenshots/mainsail-kapat-dashboard.png" width="600" alt="Mainsail main Dashboard with the Load, Pressure Advance Calibration, and Filament Profile panels alongside Toolhead, Temperatures, and Miscellaneous">
 <img src="docs/screenshots/mainsail-kapat-settings.png" width="600" alt="Mainsail Interface Settings dialog showing Load, Pressure Advance, and Filament Profile as toggleable dashboard panels">
 
+### Full grid vs. Bisection
+
+The Pressure Advance Calibration card has a toggle (top-right, next to
+"RESET") for which K-search strategy `KAPAT_SWEEP` uses:
+
+<img src="docs/screenshots/mainsail-kapat-bisection-mode.png" width="600" alt="Pressure Advance Calibration card with the Bisection mode selected, K step relabeled to stop tolerance">
+<img src="docs/screenshots/mainsail-kapat-fullgrid-mode.png" width="600" alt="Pressure Advance Calibration card with the Full grid mode selected">
+
+- **Full grid** -- the original behavior: measures every K from `K min`
+  to `K max` in steps of `K step`, then reports the `bd_pressure`
+  composite K_opt (a weighted combination of 13 step-response metrics).
+- **Bisection** -- measures only the two endpoints first, then
+  repeatedly probes the midpoint of whichever half still brackets a
+  sign change in `integral_area` (a phase-lag-derived quantity that
+  crosses zero right around the correct K), narrowing the bracket until
+  it's within `K step` (relabeled "stop tolerance" in this mode, since
+  it no longer means a fixed grid spacing). Typically visits about half
+  the K points -- and therefore about half the cycles/time -- of a full
+  grid scan for the same range, confirmed live on real hardware across
+  three different printers.
+
+Bisection reports its result honestly under its own method name,
+**"integral-area (bisection)"**, shown in the History table's "Method"
+column alongside "bd_pressure composite" entries from grid scans (the
+two can differ by close to a full `K step` on the same real capture --
+this is a genuinely different estimator, not a faster way to compute
+the same composite number). If bisection can't find a sign change
+across the whole `[K min, K max]` range (or the range is too narrow to
+bisect at all), it honestly falls back to a full grid scan instead,
+composite included.
+
 ## Install
 
 ```bash
@@ -145,10 +176,11 @@ falls back to your `[kapat]` config section's own default (see
 | Param | Meaning | Default |
 |---|---|---|
 | `TARGET_TEMP` | Extruder temp to reach first. If given, `KAPAT_SWEEP` also homes (if needed) and moves to the configured calibration position before heating -- the whole thing runs as one command, no separate `G28`/`M109` needed. Omit it and the command behaves like before: it expects the hotend already up to temp and refuses otherwise. | — |
+| `MODE` | `GRID` (scan every K in the range) or `BISECT` (bisect on the sign of `integral_area`, visiting roughly half the K points -- see "Full grid vs. Bisection" below) | `GRID` |
 | `VFR` / `VFR_LOW` | Fast/slow volumetric flow rate (mm³/s) | 19.24 / 1.92 |
 | `TSLOW` / `TFAST` | Duration of the slow/fast leg per cycle (s) | 1.0 / 0.25 |
 | `CYCLES` | Slow/fast cycles measured per K value | 8 |
-| `KSTART` / `KEND` / `KSTEP` | K sweep range | 0.0 / 0.08 / 0.005 |
+| `KSTART` / `KEND` / `KSTEP` | K sweep range. In `MODE=BISECT`, `KSTEP` means stop-tolerance (bisection halts once the bracket narrows to this width) instead of a fixed grid step. | 0.0 / 0.08 / 0.005 |
 | `WARMUP` | Extra slow-leg multiplier before the first measured cycle | 4.0 |
 | `WOBBLE_AXIS` | `X` or `Y` -- which axis nudges to trigger Klipper's pressure-advance gate | `Y` |
 | `WOBBLE` | Wobble distance in mm; `WOBBLE=0` disables it (needs the axis already homed if left on) | 0.05 |

@@ -216,6 +216,14 @@ class Kapat:
             self.gcode.run_script_from_command("G28")
         calib_x, calib_y, calib_z = self._read_calib_position()
         self._set_busy('moving', 5.)
+        # Force absolute mode first -- the machine's modal gcode state
+        # (G90 vs G91) is whatever the last print/console/jog command
+        # left it in, not something this command controls otherwise.
+        # Confirmed live on mainsailos: a leftover G91 (relative) state
+        # turned this "go to X/Y/Z" move into a relative offset from the
+        # current position instead, sending the toolhead toward Z=500
+        # and failing with "Move out of range".
+        self.gcode.run_script_from_command("G90")
         self.gcode.run_script_from_command(
             "G1 X%.3f Y%.3f Z%.3f F3000" % (calib_x, calib_y, calib_z))
         if target_temp is not None:
@@ -262,6 +270,22 @@ class Kapat:
                                       minval=0., maxval=350.)
         if target_temp is not None:
             self._prepare_for_sweep(gcmd, target_temp)
+            # Preflight is done -- drop back to idle immediately rather
+            # than leaving activity stuck at whatever _prepare_for_sweep
+            # last set it to ('homing'/'moving'/'heating'). Confirmed
+            # live: a parameter-validation error raised anywhere between
+            # here and each mode's own _set_busy(...) call (e.g. the
+            # max_extrude_cross_section ratio check, a bad WOBBLE_AXIS,
+            # KEND < KSTART, ...) happens BEFORE that mode's own
+            # try/finally exists yet, so _clear_busy() was never reached
+            # -- activity stayed reported as "heating" forever (with the
+            # hotend needlessly left hot), blocking the frontend's own
+            # busy-detection from ever seeing this printer as idle again
+            # until a full Klipper restart. Each mode sets its own fresh,
+            # more specific busy state moments later anyway once real
+            # validation passes, so clearing here costs nothing on the
+            # success path.
+            self._clear_busy()
         self._check_extrude_temp(gcmd)
 
         mode = gcmd.get('MODE', 'GRID').strip().upper()
@@ -796,8 +820,27 @@ class Kapat:
         try:
             with open(path) as f:
                 value = json.load(f)
-        except (IOError, OSError, ValueError):
+        except (IOError, OSError):
+            # Genuinely missing file (e.g. first run, nothing saved yet)
+            # -- a normal, empty starting state.
             value = []
+        except ValueError:
+            # File EXISTS but failed to parse -- NOT the same thing as
+            # "no data yet". kapatData.ts's loadList() (the frontend
+            # caller) treats a successful {value: []} response as real,
+            # trustworthy empty data and will happily feed it into a
+            # read-modify-write saveList() round trip -- if a genuinely
+            # corrupt/partially-written file were silently reported as
+            # "[]" here, that round trip would PERMANENTLY overwrite
+            # whatever data actually still exists in the corrupt file
+            # with the caller's own (much smaller) update. Surfacing a
+            # real webhook error instead lets the frontend's own
+            # "keep whatever was last successfully loaded" fallback
+            # protect the data, same as it already does for a genuine
+            # bridge/connectivity failure.
+            raise self.printer.command_error(
+                "kapat: %s.json exists but failed to parse -- refusing "
+                "to report it as empty" % (key,))
         web_request.send({'value': value})
 
     # Reached over the same webhook bridge as get_data/list_captures --

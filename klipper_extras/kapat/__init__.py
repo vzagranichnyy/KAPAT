@@ -812,7 +812,11 @@ class Kapat:
     def _data_path(self, key):
         if key not in _DATA_KEYS:
             raise self.printer.command_error("kapat: invalid data key %r" % (key,))
-        return os.path.join(self._data_dir, '%s.json' % (key,))
+        path = os.path.join(self._data_dir, '%s.json' % (key,))
+        if not os.path.abspath(path).startswith(
+                os.path.abspath(self._data_dir) + os.sep):
+            raise self.printer.command_error("kapat: invalid data key %r" % (key,))
+        return path
 
     def _handle_get_data(self, web_request):
         key = web_request.get_str('key')

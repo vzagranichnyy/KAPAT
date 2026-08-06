@@ -56,6 +56,29 @@ def _slug(s):
     return s or 'unknown'
 
 
+# Picks the next K to probe within an existing [lo, hi] bracket (already
+# confirmed to have opposite-sign integral_area at its two endpoints).
+# MODE=BISECT always bisects at the plain midpoint -- the safe, default
+# choice. MODE=BISECT_SECANT instead uses regula falsi (linear
+# interpolation between the two endpoint values, i.e. where the chord
+# connecting (lo, area_lo)-(hi, area_hi) crosses zero) -- on a roughly
+# linear integral_area-vs-K curve this converges in fewer probes than a
+# plain midpoint, at the cost of being a newer, less battle-tested path;
+# see CLAUDE.md's "how to improve bisection, in theory" discussion for
+# why this was tried. Falls back to the midpoint for degenerate cases
+# (zero/near-zero denominator, or a numerically-unstable result landing
+# outside the open bracket) rather than erroring or stalling.
+def _next_bisect_probe(mode, lo, area_lo, hi, area_hi):
+    if mode == 'BISECT_SECANT':
+        denom = area_hi - area_lo
+        if denom != 0:
+            candidate = round(lo - area_lo * (hi - lo) / denom, 6)
+            margin = (hi - lo) * 1e-3
+            if lo + margin < candidate < hi - margin:
+                return candidate
+    return round((lo + hi) / 2.0, 6)
+
+
 class Kapat:
     def __init__(self, config):
         self.printer = config.get_printer()
@@ -250,9 +273,14 @@ class Kapat:
         "estimators and applies it live (APPLY=0 to skip). Args: VFR "
         "VFR_LOW TSLOW TFAST CYCLES KSTART KEND KSTEP WARMUP WOBBLE_AXIS "
         "WOBBLE ACCEL APPLY WEIGHTS=name:val,name:val (bd_pressure metric "
-        "weight overrides) MODE=GRID|BISECT (BISECT bisects on the sign "
-        "of integral_area instead of scanning every K; KSTEP becomes a "
-        "stop-tolerance rather than a grid step in that mode).")
+        "weight overrides) MODE=GRID|BISECT|BISECT_SECANT (BISECT/"
+        "BISECT_SECANT bisect on the sign of integral_area instead of "
+        "scanning every K; KSTEP becomes a stop-tolerance rather than a "
+        "grid step in that mode. BISECT_SECANT picks each next probe by "
+        "linear interpolation between the bracket's two endpoint values "
+        "-- regula falsi -- instead of the plain midpoint, usually "
+        "converging in fewer probes on a roughly-linear integral_area "
+        "vs K curve).")
 
     def cmd_KAPAT_SWEEP(self, gcmd):
         import gc
@@ -289,8 +317,9 @@ class Kapat:
         self._check_extrude_temp(gcmd)
 
         mode = gcmd.get('MODE', 'GRID').strip().upper()
-        if mode not in ('GRID', 'BISECT'):
-            raise gcmd.error("kapat: MODE must be GRID or BISECT")
+        if mode not in ('GRID', 'BISECT', 'BISECT_SECANT'):
+            raise gcmd.error(
+                "kapat: MODE must be GRID, BISECT, or BISECT_SECANT")
 
         # FILAMENT is purely cosmetic (Klipper has no notion of a
         # "selected filament profile" -- that's a web-UI construct) --
@@ -378,7 +407,7 @@ class Kapat:
 
         gc.collect()
         self._cancel_requested = False
-        if mode == 'BISECT' and len(ks) >= 3:
+        if mode in ('BISECT', 'BISECT_SECANT') and len(ks) >= 3:
             # Bisection only ever visits ~log2(N)+2 of the N grid points --
             # a much better ETA estimate than the full-grid figure below,
             # which the frontend's busy/progress indicator polls live.
@@ -526,7 +555,8 @@ class Kapat:
                             _probe_k(kv, False)
                     else:
                         while (hi - lo) > kstep:
-                            mid = round((lo + hi) / 2.0, 6)
+                            mid = _next_bisect_probe(
+                                mode, lo, area_lo, hi, area_hi)
                             if mid <= lo or mid >= hi:
                                 break
                             area_mid = _probe_k(mid, False)
@@ -606,7 +636,7 @@ class Kapat:
         # argmin to mean anything -- report it honestly via integral-area
         # instead (see _report_sweep) rather than let a technically-
         # computable-but-misleading composite become the headline number.
-        bisect_true = (mode == 'BISECT' and not bisect_fallback)
+        bisect_true = (mode in ('BISECT', 'BISECT_SECANT') and not bisect_fallback)
         if bisect_true:
             bd_result.composite_k_opt = None
             bd_result.metric_k_opt = {}
@@ -670,13 +700,15 @@ class Kapat:
         if wob <= 0.:
             lines.append("  WARNING: WOBBLE=0 -> extrude-only moves, Klipper "
                          "applied NO pressure advance; K_opt is meaningless.")
-        if meta.get('mode') == 'bisect':
+        if meta.get('mode') in ('bisect', 'bisect_secant'):
             if meta.get('bisect_fallback'):
                 lines.append("  bisection: endpoints agreed in sign (or too "
                              "few K's) -- fell back to a full grid scan")
             else:
-                lines.append("  bisection: visited %d of %d K values" %
-                             (len(meta['ks']), meta.get('total_ks', len(meta['ks']))))
+                lines.append("  bisection (%s): visited %d of %d K values" %
+                             ('secant' if meta.get('mode') == 'bisect_secant'
+                              else 'midpoint',
+                              len(meta['ks']), meta.get('total_ks', len(meta['ks']))))
 
         lines.append("  K         phase_lag_ms   integral_area   n_samples")
         for r in result.per_k:
@@ -697,11 +729,15 @@ class Kapat:
                          (result.integral_fit.k_opt,
                           result.integral_fit.r_squared))
             if k_opt is None:
-                bisect_true = (meta.get('mode') == 'bisect'
+                bisect_true = (meta.get('mode') in ('bisect', 'bisect_secant')
                                and not meta.get('bisect_fallback'))
                 k_opt = result.integral_fit.k_opt
-                k_opt_source = ("integral-area (bisection)" if bisect_true
-                                 else "integral-area")
+                if bisect_true:
+                    k_opt_source = ("integral-area (bisection, secant)"
+                                     if meta.get('mode') == 'bisect_secant'
+                                     else "integral-area (bisection)")
+                else:
+                    k_opt_source = "integral-area"
         if result.phase_fit is not None:
             lines.append("  phase-lag K_opt     = %.4f (R^2=%.3f)" %
                          (result.phase_fit.k_opt, result.phase_fit.r_squared))

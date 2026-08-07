@@ -58,6 +58,8 @@ Interface Settings → Dashboard:
 
 ### Sweep mode: Full grid / Bisection / Secant
 
+<img src="docs/screenshots/mainsail-kapat-sweep-modes.png" width="600" alt="Pressure Advance Calibration card with the Full grid / Bisection / Secant toggle, Secant selected">
+
 The Pressure Advance Calibration card has a 3-way toggle -- all three
 run `KAPAT_SWEEP`, differing only in which K values get probed:
 

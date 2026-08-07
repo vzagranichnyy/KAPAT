@@ -56,42 +56,24 @@ Interface Settings → Dashboard:
 <img src="docs/screenshots/mainsail-kapat-dashboard.png" width="600" alt="Mainsail main Dashboard with the Load, Pressure Advance Calibration, and Filament Profile panels alongside Toolhead, Temperatures, and Miscellaneous">
 <img src="docs/screenshots/mainsail-kapat-settings.png" width="600" alt="Mainsail Interface Settings dialog showing Load, Pressure Advance, and Filament Profile as toggleable dashboard panels">
 
-### Sweep mode: secant (regula falsi) bisection
+### Sweep mode: Full grid / Bisection / Secant
 
-The Pressure Advance Calibration card always runs `KAPAT_SWEEP` in
-**secant bisection** mode -- an optimized K-search strategy that
-replaced an earlier "Full grid vs. Bisection" toggle once live testing
-across three printers showed it to be both faster and at least as
-reliable. Instead of scanning every K from `K min` to `K max`, it
-narrows a bracket around the sign change in `integral_area` (a
-phase-lag-derived quantity that crosses zero right around the correct
-K) -- but rather than always probing the bracket's plain midpoint,
-each next probe is chosen where the chord connecting the bracket's two
-known endpoint values crosses zero (the "regula falsi"/secant method),
-which converges in noticeably fewer probes than a plain midpoint on
-the roughly-linear `integral_area`-vs-K curves seen in practice.
-`K step` is relabeled "stop tolerance" in this mode, since it no longer
-means a fixed grid spacing -- it's the bracket width at which the
-search halts.
+The Pressure Advance Calibration card has a 3-way toggle -- all three
+run `KAPAT_SWEEP`, differing only in which K values get probed:
 
-It reports its result honestly under its own method name,
-**"integral-area (bisection, secant)"**, shown in the History table's
-"Method" column. If it can't find a sign change across the whole
-`[K min, K max]` range (or the range is too narrow to bisect at all),
-it honestly falls back to a full grid scan instead, composite included.
+| Mode | How it picks K | Reports |
+|---|---|---|
+| **Full grid** | Scans every K from `K min` to `K max`. | `bd_pressure` composite (13 weighted step-response metrics) |
+| **Bisection** | Narrows a bracket around the sign change of `integral_area` (crosses zero at the correct K), probing the midpoint each time. | `integral-area (bisection)` |
+| **Secant** *(default)* | Same bracket-narrowing as Bisection, but each probe is where the chord between the bracket's two known endpoints crosses zero (regula falsi) instead of the plain midpoint -- converges in noticeably fewer probes on real, roughly-linear `integral_area`-vs-K curves. | `integral-area (bisection, secant)` |
 
-**Full grid** (scans every K, reports the `bd_pressure` composite --
-a weighted combination of 13 step-response metrics) and **plain-
-midpoint bisection** (the original, always-probe-the-midpoint variant)
-are both still fully supported by `KAPAT_SWEEP` itself -- they're just
-no longer exposed as a toggle in the web UI. Run either directly from
-the console or a macro with `MODE=GRID` / `MODE=BISECT` (see the
-parameter table below). All three modes report under their own method
-name in the History table -- `"bd_pressure composite"`, `"integral-area
-(bisection)"`, or `"integral-area (bisection, secant)"` -- these are
-genuinely different estimators that can differ by close to a full
-`K step` on the same real capture, not interchangeable ways to compute
-the same number.
+Both bisection variants relabel `K step` to "stop tolerance" (the
+bracket width the search halts at, not a fixed spacing), and fall back
+to a full grid scan if no sign change exists across `[K min, K max]`.
+Each mode logs its own method name to the History table's "Method"
+column -- these are genuinely different estimators that can differ by
+close to a full `K step` on the same capture, not interchangeable ways
+to compute the same number.
 
 ## Install
 
@@ -182,7 +164,7 @@ falls back to your `[kapat]` config section's own default (see
 | Param | Meaning | Default |
 |---|---|---|
 | `TARGET_TEMP` | Extruder temp to reach first. If given, `KAPAT_SWEEP` also homes (if needed) and moves to the configured calibration position before heating -- the whole thing runs as one command, no separate `G28`/`M109` needed. Omit it and the command behaves like before: it expects the hotend already up to temp and refuses otherwise. | — |
-| `MODE` | `GRID` (scan every K in the range), `BISECT` (bisect on the sign of `integral_area`, next probe = bracket midpoint), or `BISECT_SECANT` (same bisection, but next probe = the bracket's chord zero-crossing instead of the midpoint -- usually fewer probes; the web UI's own default). See "Sweep mode: secant (regula falsi) bisection" below. | `GRID` |
+| `MODE` | `GRID`, `BISECT`, or `BISECT_SECANT` (the web UI's own default) -- see "Sweep mode: Full grid / Bisection / Secant" above. | `GRID` |
 | `VFR` / `VFR_LOW` | Fast/slow volumetric flow rate (mm³/s) | 19.24 / 1.92 |
 | `TSLOW` / `TFAST` | Duration of the slow/fast leg per cycle (s) | 1.0 / 0.25 |
 | `CYCLES` | Slow/fast cycles measured per K value | 8 |
